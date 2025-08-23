@@ -4,7 +4,7 @@ import logging
 import traceback
 from typing import Any, Dict
 
-from ..orchestrator.jobs import JobStore
+from .jobs import JobStore
 from ..config import Settings
 from ..http_client import HttpClient
 from ..storage import Storage
@@ -16,11 +16,11 @@ from ..audit import HeaderInspector, ParamToggle
 log = logging.getLogger('orch.worker')
 
 class Worker:
-    def __init__(self, name: str, jobstore: JobStore, settings: Settings, db: Storage):
+    def __init__(self, name: str, settings: Settings, jobstore: JobStore):
         self.name = name
-        self.jobstore = jobstore
         self.settings = settings
-        self.db = db
+        self.jobstore = jobstore
+        self.db = Storage(settings.db_path)
         self.http = HttpClient(settings)
         self.sm = SessionManager()
         self._stop = False
@@ -29,7 +29,8 @@ class Worker:
         self._stop = True
         await self.http.close()
 
-    async def run_forever(self):
+    async def run(self):
+        """Main worker loop"""
         log.info(f"Worker {self.name} started")
         while not self._stop:
             job = self.jobstore.claim_job(self.name)
