@@ -13,7 +13,7 @@ from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon
 from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator
 from .audit import HeaderInspector, ParamToggle
 from .reporting import Exporter
-from .orchestration import JobStore, Worker
+from .orchestrator import JobStore, Worker
 
 app = typer.Typer(add_completion=False, help="BAC-HUNTER â€" Non-aggressive recon & BAC groundwork")
 

@@ -44,6 +44,10 @@ class Settings:
     # Respectful modes
     obey_robots: bool = _env("BH_OBEY_ROBOTS", "true").lower() == "true"
 
+    # Scope policy
+    allowed_domains: List[str] = field(default_factory=lambda: [])
+    blocked_url_patterns: List[str] = field(default_factory=lambda: [])
+
     # Identities (lightweight; extended via session_manager)
     identities: List[Identity] = field(default_factory=lambda: [
         Identity(name="anon", base_headers={"User-Agent": "Mozilla/5.0 bac-hunter"}),

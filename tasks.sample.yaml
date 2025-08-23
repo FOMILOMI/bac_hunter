@@ -1,33 +1,36 @@
-"""
 # Sample task configuration for BAC-HUNTER orchestrator
-jobs:
-  - module: recon
-    target: https://example.com
-    options:
-      robots: true
-      sitemap: true  
-      js: true
+# Use with: python -m bac_hunter.cli orchestrate tasks.yaml --workers 3 -v
+
+tasks:
+  - type: recon
+    params:
+      target: https://example.com
+      options:
+        robots: true
+        sitemap: true
+        js: true
     priority: 10
 
-  - module: access
-    target: https://example.com
-    options:
-      identity_yaml: identities.yaml
-      unauth: anon
-      auth: user
-      max: 30
-      do_diff: true
-      do_idor: true
-      do_force_browse: true
+  - type: access
+    params:
+      target: https://example.com
+      options:
+        identity_yaml: identities.yaml
+        unauth: anon
+        auth: user
+        max: 30
+        do_diff: true
+        do_idor: true
+        do_force_browse: true
     priority: 20
 
-  - module: audit
-    target: https://example.com
-    options:
-      identity_yaml: identities.yaml
-      auth: user
-      max: 100
-      do_headers: true
-      do_toggles: true
+  - type: audit
+    params:
+      target: https://example.com
+      options:
+        identity_yaml: identities.yaml
+        auth: user
+        max: 100
+        do_headers: true
+        do_toggles: true
     priority: 30
-"""
