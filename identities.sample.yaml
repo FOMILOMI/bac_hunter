@@ -1,0 +1,24 @@
+"""
+identities:
+  - name: anon
+    headers:
+      User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 bac-hunter"
+      
+  - name: user
+    headers:
+      User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 bac-hunter"
+      Accept: "application/json"
+    cookie: "sessionid=YOUR_USER_SESSION_COOKIE_HERE; csrf=abc123"
+    
+  - name: admin
+    headers:
+      User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 bac-hunter"
+      Accept: "application/json"
+    auth_bearer: "YOUR_JWT_ADMIN_TOKEN_HERE"
+    
+  - name: test_user
+    headers:
+      User-Agent: "Mozilla/5.0 bac-hunter"
+      Accept: "application/json"
+    cookie: "auth_token=test123; role=user"
+"""
