@@ -12,6 +12,10 @@ from ..session_manager import SessionManager
 from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, GraphQLRecon
 from ..access import IDORProbe, DifferentialTester, ForceBrowser
 from ..audit import HeaderInspector, ParamToggle
+from ..exploitation.privilege_escalation import PrivilegeEscalationTester
+from ..advanced.parameter_miner import ParameterMiner
+from ..integrations import SubfinderWrapper, PDHttpxWrapper
+from ..notifications import AlertManager
 from ..safety.scope_guard import ScopeGuard
 
 log = logging.getLogger('orch.worker')
@@ -25,6 +29,7 @@ class Worker:
         self.http = HttpClient(settings)
         self.sm = SessionManager()
         self.scope = ScopeGuard(allowed_domains=self.settings.allowed_domains, blocked_patterns=self.settings.blocked_url_patterns)
+        self.alerter = AlertManager()
         self._stop = False
 
     async def shutdown(self):
@@ -51,7 +56,7 @@ class Worker:
                 self.jobstore.mark_failed(jid, str(e))
 
     async def _run_job(self, jid: int, spec: Dict[str,Any]):
-        # spec keys: module: 'recon'|'access'|'audit', target: 'https://..', options: {}
+        # spec keys: module: 'recon'|'access'|'audit'|'exploit'|'authorize', target: 'https://..', options: {}
         module = spec.get('module')
         target = spec.get('target')
         opts = spec.get('options', {}) or {}
@@ -132,5 +137,54 @@ class Worker:
                 await hi.run(urls, ident)
             if opts.get('do_toggles', True):
                 await pt.run(urls, ident)
+        elif module == 'exploit':
+            if opts.get('identity_yaml'):
+                try:
+                    self.sm.load_yaml(opts['identity_yaml'])
+                except Exception as e:
+                    log.warning(f"Failed to load identity_yaml: {e}")
+            low = self.sm.get(opts.get('low', 'anon'))
+            if not low:
+                log.warning("No low privilege identity provided for exploit module")
+                return
+            pet = PrivilegeEscalationTester(self.settings, self.http, self.db)
+            miner = ParameterMiner(self.settings, self.http, self.db)
+            # Admin endpoints try
+            await pet.test_admin_endpoints(target, low)
+            # Parameter mining on known URLs
+            urls = list(dict.fromkeys(self.db.iter_target_urls(tid)))[: opts.get('max', 60)]
+            for u in urls:
+                try:
+                    await miner.mine_parameters(u, low, max_params=10)
+                except Exception:
+                    continue
+        elif module == 'authorize':
+            # Burp Autorize-like: use external httpx and subfinder to broaden but low-noise
+            sub = SubfinderWrapper()
+            httpx = PDHttpxWrapper()
+            # Enumerate subdomains (passive)
+            domain = target.replace('https://','').replace('http://','').split('/')[0]
+            subs = await sub.enumerate(domain)
+            # Construct candidate roots
+            roots = [target.rstrip('/')]
+            for s in subs[:opts.get('max_subs', 10)]:
+                scheme = 'https://'
+                roots.append(f"{scheme}{s}")
+            # Probe with httpx
+            results = await httpx.probe(roots, rps=min(2.0, self.settings.max_rps))
+            for r in results:
+                url = r.get('url')
+                status = r.get('status_code')
+                if not url or status is None:
+                    continue
+                if not self.scope.is_in_scope(url):
+                    continue
+                self.db.add_finding_for_url(url, 'authorize_probe', f"status={status}", 0.2)
+                if int(status) in (200, 206):
+                    # Notify potential broadened surface
+                    try:
+                        await self.alerter.send("Accessible endpoint", f"httpx 200 on {url}", 0.4, url)
+                    except Exception:
+                        pass
         else:
             raise RuntimeError(f'unknown module {module}')

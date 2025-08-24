@@ -10,10 +10,13 @@ from .http_client import HttpClient
 from .storage import Storage
 from .session_manager import SessionManager
 from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon
-from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator
+from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
 from .audit import HeaderInspector, ParamToggle
 from .reporting import Exporter
 from .orchestrator import JobStore, Worker
+from .integrations import SubfinderWrapper, PDHttpxWrapper
+from .exploitation.privilege_escalation import PrivilegeEscalationTester
+from .advanced.parameter_miner import ParameterMiner
 
 app = typer.Typer(add_completion=False, help="BAC-HUNTER â€" Non-aggressive recon & BAC groundwork")
 
@@ -101,7 +104,7 @@ def orchestrate(
         task_params = task.get("params", {})
         priority = task.get("priority", 0)
         
-        if task_type in ["recon", "access", "audit"]:
+        if task_type in ["recon", "access", "audit", "exploit", "authorize"]:
             job_store.enqueue_job(task_type, task_params, priority)
             task_count += 1
     
@@ -309,3 +312,113 @@ def access(
             await http.close()
 
     asyncio.run(run_all())
+
+
+@app.command()
+def authorize(
+    target: str = typer.Argument(..., help="Base domain or URL"),
+    verbose: int = typer.Option(1, "-v"),
+    max_subs: int = typer.Option(10, help="Max passive subdomains"),
+    rps: float = typer.Option(2.0, help="RPS for httpx probe"),
+):
+    """Burp Autorize-style light probe combining subfinder + httpx."""
+    settings = Settings()
+    setup_logging(verbose)
+
+    async def run_all():
+        sub = SubfinderWrapper()
+        httpx = PDHttpxWrapper()
+        # Derive domain
+        dom = target.replace('https://','').replace('http://','').split('/')[0]
+        subs = await sub.enumerate(dom)
+        roots = [target.rstrip('/')]
+        for s in subs[:max_subs]:
+            roots.append(f"https://{s}")
+        results = await httpx.probe(roots, rps=rps)
+        for r in results:
+            typer.echo(f"{r.get('status_code')}\t{r.get('url')}")
+
+    asyncio.run(run_all())
+
+
+@app.command()
+def exploit(
+    target: list[str] = typer.Argument(..., help="Base URLs to test"),
+    identities_yaml: str = typer.Option("", help="YAML with identities"),
+    low_name: str = typer.Option("anon", help="Low-priv identity"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    """Run safe privilege-escalation checks and parameter mining."""
+    settings = Settings()
+    settings.targets = target
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    sm = SessionManager()
+    if identities_yaml:
+        try:
+            sm.load_yaml(identities_yaml)
+        except Exception as e:
+            typer.echo(f"[warn] failed to load identities yaml: {e}")
+    low = sm.get(low_name) or sm.get("anon")
+
+    async def run_all():
+        http = HttpClient(settings)
+        try:
+            pet = PrivilegeEscalationTester(settings, http, db)
+            miner = ParameterMiner(settings, http, db)
+            for base in settings.targets:
+                await pet.test_admin_endpoints(base, low)
+                tid = db.ensure_target(base)
+                urls = list(dict.fromkeys(db.iter_target_urls(tid)))[:80]
+                for u in urls:
+                    await miner.mine_parameters(u, low, max_params=10)
+        finally:
+            await http.close()
+
+    asyncio.run(run_all())
+
+
+@app.command()
+def har_replay(
+    har: str = typer.Argument(..., help="Path to HAR file"),
+    identities_yaml: str = typer.Option("", help="Identities for comparison"),
+    id_order: list[str] = typer.Option([], help="Identity names order, first is baseline"),
+    max_urls: int = typer.Option(80, help="Max GET URLs from HAR"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    """Replay GET requests from HAR across identities and compare like Autorize."""
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    sm = SessionManager()
+    if identities_yaml:
+        sm.load_yaml(identities_yaml)
+    idents = [sm.get(n) for n in (id_order or []) if sm.get(n)]
+    if not idents:
+        # fallback: anon only
+        anon = sm.get("anon")
+        if not anon:
+            typer.echo("[err] anon identity missing")
+            raise typer.Exit(1)
+        idents = [anon]
+    async def run_all():
+        http = HttpClient(settings)
+        try:
+            harx = HARReplayAnalyzer(settings, http, db)
+            await harx.analyze(har, idents, max_urls=max_urls)
+        finally:
+            await http.close()
+    asyncio.run(run_all())
+
+
+@app.command()
+def db_prune(
+    max_mb: int = typer.Option(500, help="Max DB size in MB"),
+    verbose: int = typer.Option(0, "-v"),
+):
+    """Prune SQLite to roughly cap size."""
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    db.prune_to_max_size(max_mb * 1024 * 1024)
+    typer.echo("[ok] prune attempted")

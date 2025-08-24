@@ -4,6 +4,7 @@ import logging
 import tempfile
 from typing import List, Dict, Set
 from pathlib import Path
+import shutil
 
 from .external_tools import ExternalToolRunner
 from ..storage import Storage
