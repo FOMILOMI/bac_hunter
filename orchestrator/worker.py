@@ -9,9 +9,10 @@ from ..config import Settings
 from ..http_client import HttpClient
 from ..storage import Storage
 from ..session_manager import SessionManager
-from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon
+from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, GraphQLRecon
 from ..access import IDORProbe, DifferentialTester, ForceBrowser
 from ..audit import HeaderInspector, ParamToggle
+from ..safety.scope_guard import ScopeGuard
 
 log = logging.getLogger('orch.worker')
 
@@ -23,6 +24,7 @@ class Worker:
         self.db = Storage(settings.db_path)
         self.http = HttpClient(settings)
         self.sm = SessionManager()
+        self.scope = ScopeGuard(allowed_domains=self.settings.allowed_domains, blocked_patterns=self.settings.blocked_url_patterns)
         self._stop = False
 
     async def shutdown(self):
@@ -56,6 +58,10 @@ class Worker:
         
         if not target:
             raise ValueError("No target specified")
+        
+        if not self.scope.is_in_scope(target):
+            log.info("Skipping out-of-scope target: %s", target)
+            return
             
         tid = self.db.ensure_target(target)
         
@@ -67,6 +73,8 @@ class Worker:
                 plugins.append(SitemapRecon(self.settings, self.http, self.db))
             if opts.get('js', True): 
                 plugins.append(JSEndpointsRecon(self.settings, self.http, self.db))
+            if opts.get('graphql', True):
+                plugins.append(GraphQLRecon(self.settings, self.http, self.db))
             
             for p in plugins:
                 await p.run(target, tid)
@@ -92,6 +100,7 @@ class Worker:
             
             # fetch candidates from DB and run small set
             urls = list(dict.fromkeys(self.db.iter_target_urls(tid)))
+            urls = [u for u in urls if self.scope.is_in_scope(u)]
             urls = urls[: opts.get('max', 40)]
             
             for u in urls:
@@ -117,6 +126,7 @@ class Worker:
             pt = ParamToggle(self.settings, self.http, self.db)
             
             urls = list(dict.fromkeys(self.db.iter_target_urls(tid)))[: opts.get('max', 120)]
+            urls = [u for u in urls if self.scope.is_in_scope(u)]
             
             if opts.get('do_headers', True):
                 await hi.run(urls, ident)

@@ -12,10 +12,15 @@ CREATE TABLE IF NOT EXISTS jobs(
   worker TEXT DEFAULT '',
   result TEXT DEFAULT '',
   priority INTEGER DEFAULT 100,
+  retry_count INTEGER DEFAULT 0,
+  max_retries INTEGER DEFAULT 2,
+  idempotency_key TEXT UNIQUE,
+  available_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, priority, created_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status, priority, available_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_available ON jobs(available_at);
 '''
 
 class JobStore:
@@ -36,23 +41,32 @@ class JobStore:
             con.commit()
             con.close()
 
-    def enqueue_job(self, job_type: str, params: Dict[str, Any], priority: int = 100) -> int:
-        """Enqueue a new job with type and parameters"""
+    def enqueue_job(self, job_type: str, params: Dict[str, Any], priority: int = 100, idempotency_key: Optional[str] = None, max_retries: int = 2) -> int:
+        """Enqueue a new job with type and parameters.
+        If idempotency_key is provided and already exists, return the existing job id.
+        """
         spec = {
             'module': job_type,
             'target': params.get('target'),
             'options': params.get('options', {})
         }
         with self.conn() as c:
-            c.execute("INSERT INTO jobs(spec, priority) VALUES (?,?)", (json.dumps(spec), priority))
+            if idempotency_key:
+                row = c.execute("SELECT id FROM jobs WHERE idempotency_key=?", (idempotency_key,)).fetchone()
+                if row:
+                    return int(row[0])
+            c.execute(
+                "INSERT INTO jobs(spec, priority, idempotency_key, max_retries, available_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)",
+                (json.dumps(spec), priority, idempotency_key, max_retries)
+            )
             return c.lastrowid
 
     def claim_job(self, worker_name: str) -> Optional[Tuple[int, Dict[str, Any]]]:
-        # atomic claim: pick lowest priority, oldest pending
+        # atomic claim: pick lowest priority, oldest pending, available for execution
         with self.conn() as c:
             # choose a job id
             row = c.execute(
-                "SELECT id,spec FROM jobs WHERE status='pending' ORDER BY priority ASC, created_at ASC LIMIT 1"
+                "SELECT id,spec FROM jobs WHERE status='pending' AND available_at <= CURRENT_TIMESTAMP ORDER BY priority ASC, created_at ASC LIMIT 1"
             ).fetchone()
             if not row:
                 return None
@@ -68,16 +82,30 @@ class JobStore:
     def mark_done(self, job_id: int, result: Dict[str, Any] | None = None):
         with self.conn() as c:
             c.execute(
-                "UPDATE jobs SET status='done', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", 
+                "UPDATE jobs SET status='done', result=?, updated_at=CURRENT_TIMESTAMP WHERE id= ?", 
                 (json.dumps(result or {}), job_id)
             )
 
     def mark_failed(self, job_id: int, reason: str):
+        """Mark job failed; if retries remain, schedule with exponential backoff and set back to pending."""
         with self.conn() as c:
-            c.execute(
-                "UPDATE jobs SET status='failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", 
-                (json.dumps({'error': reason}), job_id)
-            )
+            row = c.execute("SELECT retry_count, max_retries FROM jobs WHERE id=?", (job_id,)).fetchone()
+            if not row:
+                return
+            retry_count, max_retries = int(row[0] or 0), int(row[1] or 0)
+            if retry_count < max_retries:
+                new_retry = retry_count + 1
+                # backoff: base 2 seconds, capped at 300s
+                delay = min(300, (2 ** new_retry) * 2)
+                c.execute(
+                    "UPDATE jobs SET status='pending', result=?, retry_count=?, available_at=datetime('now', ? || ' seconds'), updated_at=CURRENT_TIMESTAMP WHERE id=?",
+                    (json.dumps({'error': reason, 'retry': new_retry}), new_retry, str(delay), job_id)
+                )
+            else:
+                c.execute(
+                    "UPDATE jobs SET status='failed', result=?, updated_at=CURRENT_TIMESTAMP WHERE id=?", 
+                    (json.dumps({'error': reason, 'retry': retry_count}), job_id)
+                )
 
     def get_status(self) -> Dict[str, int]:
         """Get job counts by status"""
