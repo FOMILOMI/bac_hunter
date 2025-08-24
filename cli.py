@@ -17,6 +17,10 @@ from .orchestrator import JobStore, Worker
 from .integrations import SubfinderWrapper, PDHttpxWrapper
 from .exploitation.privilege_escalation import PrivilegeEscalationTester
 from .advanced.parameter_miner import ParameterMiner
+from .fallback import PathScanner, ParamScanner
+from .profiling import TargetProfiler
+from .webapp import app as dashboard_app
+import uvicorn
 
 app = typer.Typer(add_completion=False, help="BAC-HUNTER - Non-aggressive recon & BAC groundwork")
 
@@ -67,6 +71,121 @@ def recon(
             await http.close()
 
     asyncio.run(run_all())
+
+
+@app.command(help="Run a fast automatic BAC/IDOR quick scan. Minimal setup; YAML optional.")
+def quickscan(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    identities_yaml: str = typer.Option("", help="Optional identities.yaml for authenticated checks"),
+    auth_name: str = typer.Option("", help="Authenticated identity name (if provided)"),
+    max_rps: float = typer.Option(2.0, help="Global RPS cap"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    """Performs: profile -> recon -> fallback path scan -> optional param toggles -> light access tests."""
+    settings = Settings()
+    settings.targets = target
+    settings.max_rps = max_rps
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    sm = SessionManager()
+    if identities_yaml:
+        try:
+            sm.load_yaml(identities_yaml)
+        except Exception as e:
+            typer.echo(f"[warn] failed to load identities yaml: {e}")
+    unauth = sm.get("anon")
+    auth = sm.get(auth_name) if auth_name else None
+
+    async def run_all():
+        http = HttpClient(settings)
+        profiler = TargetProfiler(settings, http)
+        pscan = PathScanner(settings, http, db)
+        qscan = ParamScanner(settings, http, db)
+        diff = DifferentialTester(settings, http, db)
+        idor = IDORProbe(settings, http, db)
+        fb = ForceBrowser(settings, http, db)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                prof = await profiler.profile(base, unauth)
+                typer.echo(f"[profile] kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
+                # Recon
+                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db)):
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
+                # Fallback scans regardless of externals
+                await pscan.run(base, unauth)
+                if auth is not None:
+                    await qscan.run(base, auth)
+                # Light access checks on a small sample
+                if auth is not None:
+                    urls = list(dict.fromkeys(db.iter_target_urls(tid)))[:30]
+                    for u in urls:
+                        try:
+                            await diff.compare_identities(u, unauth, auth)
+                            await idor.test(base, u, unauth, auth)
+                        except Exception:
+                            continue
+                    await fb.try_paths(urls[:20], unauth, auth)
+        finally:
+            await http.close()
+    asyncio.run(run_all())
+
+
+@app.command(help="Interactive setup wizard to generate identities.yaml and tasks.yaml")
+def setup(
+    out_dir: str = typer.Option(".", help="Directory to write YAML files"),
+    verbose: int = typer.Option(0, "-v"),
+):
+    import os, yaml
+    setup_logging(verbose)
+    typer.echo("This wizard will help you create identities.yaml and tasks.yaml")
+    # Identities
+    identities = []
+    if typer.confirm("Do you want to add an authenticated identity?", default=False):
+        name = typer.prompt("Identity name", default="user")
+        auth_kind = typer.prompt("Auth type (cookie/bearer/basic)", default="cookie")
+        if auth_kind == "cookie":
+            cookie = typer.prompt("Cookie header value", default="session=...;")
+            identities.append({"name": name, "headers": {"User-Agent": "Mozilla/5.0"}, "cookie": cookie})
+        elif auth_kind == "bearer":
+            token = typer.prompt("Bearer token (JWT)", default="ey...")
+            identities.append({"name": name, "headers": {"User-Agent": "Mozilla/5.0"}, "auth_bearer": token})
+        else:
+            user = typer.prompt("Basic username")
+            pwd = typer.prompt("Basic password", hide_input=True)
+            import base64
+            b = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+            identities.append({"name": name, "headers": {"Authorization": f"Basic {b}"}})
+    identities_yaml = {"identities": identities or [{"name": "anon", "headers": {"User-Agent": "Mozilla/5.0"}}]}
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "identities.yaml"), "w", encoding="utf-8") as f:
+        yaml.safe_dump(identities_yaml, f, sort_keys=False)
+    typer.echo(f"[ok] wrote {os.path.join(out_dir, 'identities.yaml')}")
+    # Tasks template
+    target = typer.prompt("Default target (https://example.com)", default="https://example.com")
+    framework = typer.prompt("Target tech (wordpress/laravel/node/other)", default="other")
+    tasks = {
+        "tasks": [
+            {"type": "recon", "params": {"target": target, "robots": True, "sitemap": True, "js": True}, "priority": 0},
+            {"type": "access", "params": {"target": target, "identity_yaml": "identities.yaml", "unauth": "anon", "auth": identities[0]["name"] if identities else ""}, "priority": 1},
+            {"type": "audit", "params": {"target": target, "auth": identities[0]["name"] if identities else ""}, "priority": 1},
+        ]
+    }
+    with open(os.path.join(out_dir, "tasks.yaml"), "w", encoding="utf-8") as f:
+        yaml.safe_dump(tasks, f, sort_keys=False)
+    typer.echo(f"[ok] wrote {os.path.join(out_dir, 'tasks.yaml')}")
+
+
+@app.command(help="Start the web dashboard for real-time results and controls")
+def dashboard(
+    host: str = typer.Option("127.0.0.1", help="Bind host"),
+    port: int = typer.Option(8000, help="Bind port"),
+    reload: bool = typer.Option(False, help="Auto-reload on code changes"),
+):
+    uvicorn.run(dashboard_app, host=host, port=port, reload=reload)
 
 
 @app.command()
