@@ -7,10 +7,13 @@ import re
 import json
 
 from ..storage import Storage
+from ..monitoring.stats_collector import StatsCollector
+from ..recommendations import RecommendationsEngine
 
 class Exporter:
     def __init__(self, storage: Storage):
         self.db = storage
+        self.reco = RecommendationsEngine()
 
     def to_csv(self, path: str = "report.csv"):
         with self.db.conn() as c, open(path, "w", newline="", encoding="utf-8") as f:
@@ -24,10 +27,15 @@ class Exporter:
         with self.db.conn() as c:
             rows = list(c.execute("SELECT t.base_url, f.type, f.url, f.evidence, f.score FROM findings f JOIN targets t ON f.target_id=t.id ORDER BY f.score DESC, f.id DESC"))
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+        rec_sections = []
+        for (base, t, u, e, s) in rows[:50]:
+            tips = self.reco.suggest(t)
+            rec_sections.append(f"<details><summary>{self._escape(t)} on {self._escape(u)}</summary><ul>" + "".join(f"<li>{self._escape(x)}</li>" for x in tips) + "</ul></details>")
         parts = [
             "<!doctype html><meta charset='utf-8'><title>BAC Hunter Report</title>",
-            "<style>body{font-family:system-ui,Segoe UI,Roboto,sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f6f6f6;text-align:left}tr:hover{background:#fafafa}</style>",
+            "<style>body{font-family:system-ui,Segoe UI,Roboto,sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f6f6f6;text-align:left}tr:hover{background:#fafafa}details{margin:8px 0}</style>",
             f"<h1>BAC Hunter Report</h1><p>Generated {now}</p>",
+            "<h2>Findings</h2>",
             "<table><thead><tr><th>#</th><th>Base</th><th>Type</th><th>URL</th><th>Evidence</th><th>Score</th></tr></thead><tbody>"
         ]
         for i, (base, t, u, e, s) in enumerate(rows, start=1):
@@ -35,6 +43,8 @@ class Exporter:
                 f"<tr><td>{i}</td><td>{self._escape(base)}</td><td>{self._escape(t)}</td><td><a href='{self._escape(u)}' target='_blank'>{self._escape(u)}</a></td><td>{self._escape(self._redact(e))}</td><td>{s:.2f}</td></tr>"
             )
         parts.append("</tbody></table>")
+        if rec_sections:
+            parts.append("<h2>Recommendations</h2>" + "".join(rec_sections))
         html_str = "".join(parts)
         with open(path, "w", encoding="utf-8") as f:
             f.write(html_str)
@@ -49,12 +59,24 @@ class Exporter:
                     "url": u,
                     "evidence": self._redact(e),
                     "score": float(s),
+                    "recommendations": self.reco.suggest(t),
                 }
                 for (base, t, u, e, s) in c.execute("SELECT t.base_url, f.type, f.url, f.evidence, f.score FROM findings f JOIN targets t ON f.target_id=t.id ORDER BY f.score DESC, f.id DESC")
             ]
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"generated_at": datetime.utcnow().isoformat() + "Z", "findings": rows}, f, indent=2)
         return path
+
+    def to_pdf(self, path: str = "report.pdf"):
+        """Generate PDF using WeasyPrint if available; otherwise fallback to HTML and warn."""
+        try:
+            from weasyprint import HTML  # type: ignore
+            html_path = self.to_html("report.tmp.html")
+            HTML(filename=html_path).write_pdf(path)
+            return path
+        except Exception:
+            # Fallback: write HTML and let user convert
+            return self.to_html(path.replace('.pdf', '.html'))
 
     def _escape(self, s: str) -> str:
         return (
