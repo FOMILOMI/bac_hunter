@@ -6,7 +6,7 @@ import httpx
 import time
 
 from .config import Settings
-from .rate_limiter import RateLimiter
+from .rate_limiter import RateLimiter, AdaptiveRateLimiter
 from .utils import host_of, jitter, pick_ua
 from .monitoring.stats_collector import StatsCollector
 from .safety.throttle_calibrator import ThrottleCalibrator
@@ -20,10 +20,16 @@ class HttpClient:
         self.s = settings
         limits = httpx.Limits(max_connections=settings.max_concurrency, max_keepalive_connections=settings.max_concurrency)
         self._client = httpx.AsyncClient(timeout=self.s.timeout_seconds, trust_env=True, proxy=self.s.proxy, limits=limits)
-        self._rl = RateLimiter(self.s.max_rps, self.s.per_host_rps)
+        # Use adaptive limiter when enabled
+        if self.s.enable_adaptive_throttle:
+            self._rl = AdaptiveRateLimiter(self.s.max_rps, self.s.per_host_rps, None)  # will set calibrator below
+        else:
+            self._rl = RateLimiter(self.s.max_rps, self.s.per_host_rps)
         self._sem = asyncio.Semaphore(self.s.max_concurrency)
         self._stats = StatsCollector()
         self._cal = ThrottleCalibrator(initial_rps=self.s.max_rps) if self.s.enable_adaptive_throttle else None
+        if isinstance(self._rl, AdaptiveRateLimiter):
+            self._rl.calibrator = self._cal
         self._waf = WAFDetector() if self.s.enable_waf_detection else None
         # simple in-memory GET cache
         self._cache: Dict[str, tuple[float, httpx.Response]] = {}

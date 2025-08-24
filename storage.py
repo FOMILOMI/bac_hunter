@@ -95,6 +95,13 @@ class Storage:
                 (target_id, type_, url, evidence, score),
             )
 
+    def update_finding_score(self, target_id: int, type_: str, url: str, score: float):
+        with self.conn() as c:
+            c.execute(
+                "UPDATE findings SET score=? WHERE target_id=? AND type=? AND url=?",
+                (score, target_id, type_, url),
+            )
+
     def iter_findings(self) -> Iterable[Tuple[int, str, str, str, float]]:
         with self.conn() as c:
             for row in c.execute("SELECT target_id, type, url, evidence, score FROM findings ORDER BY score DESC"):

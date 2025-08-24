@@ -1,5 +1,10 @@
-from .parameter_miner import ParameterMiner
 from .endpoint_fuzzer import EndpointFuzzer
-from .response_analyzer import ResponseAnalyzer
+from .parameter_miner import ParameterMiner
+from .response_analyzer import ResponseAnalyzer, VulnerabilityAnalyzer
 
-__all__ = ["ParameterMiner", "EndpointFuzzer", "ResponseAnalyzer"]
+__all__ = [
+	"EndpointFuzzer",
+	"ParameterMiner",
+	"ResponseAnalyzer",
+	"VulnerabilityAnalyzer",
+]

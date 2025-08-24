@@ -39,3 +39,28 @@ class RateLimiter:
             self.host_buckets[host].take(1.0),
         )
 
+    def set_rates(self, global_rps: float, per_host_rps: float):
+        """Dynamically adjust token bucket rates."""
+        self.global_bucket.rate = max(0.1, global_rps)
+        for bucket in self.host_buckets.values():
+            bucket.rate = max(0.1, per_host_rps)
+
+
+class AdaptiveRateLimiter(RateLimiter):
+    def __init__(self, global_rps: float, per_host_rps: float, calibrator):
+        super().__init__(global_rps, per_host_rps)
+        self.calibrator = calibrator
+        self._last_update = 0.0
+
+    async def acquire(self, host: str):
+        # Periodically sync rates from calibrator
+        now = time.perf_counter()
+        if self.calibrator is not None and (now - self._last_update) > 0.5:
+            current = getattr(self.calibrator, "current_rps", None)
+            if isinstance(current, (int, float)) and current:
+                global_rps = max(0.5, min(current, 50.0))
+                per_host = max(0.25, min(global_rps / 2.0, 10.0))
+                self.set_rates(global_rps, per_host)
+            self._last_update = now
+        await super().acquire(host)
+

@@ -9,7 +9,7 @@ from .logging_setup import setup_logging
 from .http_client import HttpClient
 from .storage import Storage
 from .session_manager import SessionManager
-from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon
+from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector
 from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
 from .audit import HeaderInspector, ParamToggle
 from .reporting import Exporter
@@ -61,6 +61,8 @@ def recon(
                     plugins.append(SitemapRecon(settings, http, db))
                 if settings.enable_recon_js_endpoints:
                     plugins.append(JSEndpointsRecon(settings, http, db))
+                # Smart endpoint detection
+                plugins.append(SmartEndpointDetector(settings, http, db))
 
                 for p in plugins:
                     try:
@@ -110,7 +112,7 @@ def quickscan(
                 prof = await profiler.profile(base, unauth)
                 typer.echo(f"[profile] kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
                 # Recon
-                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db)):
+                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db), SmartEndpointDetector(settings, http, db)):
                     try:
                         await p.run(base, tid)
                     except Exception:
@@ -129,6 +131,50 @@ def quickscan(
                         except Exception:
                             continue
                     await fb.try_paths(urls[:20], unauth, auth)
+        finally:
+            await http.close()
+    asyncio.run(run_all())
+
+
+@app.command(help="Smart scan with quick defaults; --smart-mode enables extra detectors")
+def scan(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    identities_yaml: str = typer.Option("", help="Optional identities.yaml for authenticated checks"),
+    auth_name: str = typer.Option("", help="Authenticated identity name (if provided)"),
+    smart_mode: bool = typer.Option(True, help="Enable SmartEndpointDetector and heuristics"),
+    max_rps: float = typer.Option(2.0, help="Global RPS cap"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    settings = Settings()
+    settings.targets = target
+    settings.max_rps = max_rps
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    sm = SessionManager()
+    if identities_yaml:
+        try:
+            sm.load_yaml(identities_yaml)
+        except Exception as e:
+            typer.echo(f"[warn] failed to load identities yaml: {e}")
+    unauth = sm.get("anon")
+    auth = sm.get(auth_name) if auth_name else None
+
+    async def run_all():
+        http = HttpClient(settings)
+        profiler = TargetProfiler(settings, http)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                prof = await profiler.profile(base, unauth)
+                typer.echo(f"[profile] kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
+                plugins = [RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db)]
+                if smart_mode:
+                    plugins.append(SmartEndpointDetector(settings, http, db))
+                for p in plugins:
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
         finally:
             await http.close()
     asyncio.run(run_all())
@@ -177,6 +223,57 @@ def setup(
     with open(os.path.join(out_dir, "tasks.yaml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(tasks, f, sort_keys=False)
     typer.echo(f"[ok] wrote {os.path.join(out_dir, 'tasks.yaml')}")
+
+
+@app.command(help="Analyze findings: risk scoring and optional auth mapping")
+def analyze(
+    verbose: int = typer.Option(0, "-v"),
+    do_auth: bool = typer.Option(False, help="Attempt lightweight auth flow analysis on last target"),
+    report: str = typer.Option("", help="Optional output report: html|csv|json|pdf"),
+    target: str = typer.Option("", help="Target base URL for auth analysis"),
+    identities_yaml: str = typer.Option("", help="Identities for auth analysis"),
+    auth_name: str = typer.Option("", help="Identity name"),
+):
+    from .advanced import VulnerabilityAnalyzer
+    from .advanced.auth_analyzer import AuthAnalyzer
+
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+
+    va = VulnerabilityAnalyzer(db)
+    results = va.analyze()
+    typer.echo(f"[ok] analyzed {len(results)} findings")
+
+    if do_auth and target:
+        sm = SessionManager()
+        if identities_yaml:
+            try:
+                sm.load_yaml(identities_yaml)
+            except Exception as e:
+                typer.echo(f"[warn] failed to load identities yaml: {e}")
+        http = HttpClient(settings)
+        try:
+            aa = AuthAnalyzer(settings, http, db)
+            unauth = sm.get("anon")
+            auth = sm.get(auth_name) if auth_name else None
+            info = asyncio.run(aa.analyze_auth_flow(target, unauth, auth))
+            typer.echo(str(info))
+        finally:
+            asyncio.run(http.close())
+
+    if report:
+        ex = Exporter(db)
+        fmt = report.lower()
+        if fmt.endswith(".csv") or fmt == "csv":
+            path = ex.to_csv("report.csv")
+        elif fmt.endswith(".json") or fmt == "json":
+            path = ex.to_json("report.json")
+        elif fmt.endswith(".pdf") or fmt == "pdf":
+            path = ex.to_pdf("report.pdf")
+        else:
+            path = ex.to_html("report.html")
+        typer.echo(f"[ok] wrote {path}")
 
 
 @app.command(help="Start the web dashboard for real-time results and controls")
@@ -543,3 +640,61 @@ def db_prune(
     db = Storage(settings.db_path)
     db.prune_to_max_size(max_mb * 1024 * 1024)
     typer.echo("[ok] prune attempted")
+
+
+@app.command(help="CI mode: run scan per YAML config and exit non-zero on high risk")
+def ci(
+    config: str = typer.Option(".bac-hunter.yml", "--config", help="Config file path"),
+    fail_threshold: float = typer.Option(0.8, help="Fail build if any finding >= threshold"),
+    verbose: int = typer.Option(0, "-v"),
+):
+    import yaml
+    setup_logging(verbose)
+    try:
+        with open(config, "r", encoding="utf-8") as f:
+            cfg = yaml.safe_load(f) or {}
+    except Exception as e:
+        typer.echo(f"[error] Failed to read config: {e}")
+        raise typer.Exit(2)
+
+    settings = Settings()
+    targets = cfg.get("targets") or []
+    identities_yaml = cfg.get("identities")
+    auth_name = cfg.get("auth") or ""
+    smart_mode = bool(cfg.get("smart", True))
+
+    db = Storage(settings.db_path)
+    sm = SessionManager()
+    if identities_yaml:
+        try:
+            sm.load_yaml(identities_yaml)
+        except Exception:
+            pass
+
+    async def run_all():
+        http = HttpClient(settings)
+        try:
+            for base in targets:
+                tid = db.ensure_target(base)
+                plugins = [RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db)]
+                if smart_mode:
+                    plugins.append(SmartEndpointDetector(settings, http, db))
+                for p in plugins:
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
+        finally:
+            await http.close()
+
+    asyncio.run(run_all())
+
+    # Evaluate risk
+    worst = 0.0
+    for _, _, _, _, score in db.iter_findings():
+        if score > worst:
+            worst = score
+    if worst >= fail_threshold:
+        typer.echo(f"[fail] High risk finding detected: score={worst:.2f} >= {fail_threshold:.2f}")
+        raise typer.Exit(3)
+    typer.echo("[ok] No findings above threshold")
