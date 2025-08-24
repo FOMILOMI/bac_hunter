@@ -1,4 +1,4 @@
-Professional-grade, non-aggressive automation framework for discovering Broken Access Control vulnerabilities. Built for Windows 11 + Ubuntu WSL with modular architecture, smart rate limiting, and comprehensive reporting.
+Professional-grade, non-aggressive automation framework for discovering Broken Access Control vulnerabilities. Built with modular architecture, smart rate limiting, unified orchestration, and comprehensive reporting.
 
 ## 🎯 Highlights
 
@@ -21,15 +21,21 @@ pip install -U pip
 pip install -r requirements.txt
 ```
 
-### One-liner Quick Scan
+### Unified Scans
 ```bash
-python -m bac_hunter.cli quickscan https://target.com -v 1
+# Full pipeline
+python -m bac_hunter.cli scan-full https://example.com --mode standard -v 1
+
+# Quick 15-minute assessment
+python -m bac_hunter.cli scan-quick https://target.com --mode standard --timeout 15 -v 1
+
+# Custom phase selection
+python -m bac_hunter.cli scan-custom https://example.com --phases recon,audit --mode aggressive -v 1
 ```
-- Adds recon + fallback path/param scans automatically
-- If you have identities:
+– If you have identities:
 ```bash
-python -m bac_hunter.cli quickscan https://target.com \
-  --identities-yaml identities.yaml --auth-name user -v 1
+python -m bac_hunter.cli scan-full https://target.com \
+  --mode standard --identities-yaml identities.yaml --auth-name user -v 1
 ```
 
 ### Web Dashboard
@@ -75,6 +81,7 @@ python -m bac_hunter.cli audit https://target.com \
 python -m bac_hunter.cli report --output report.html
 python -m bac_hunter.cli report --output findings.csv
 python -m bac_hunter.cli report --output report.pdf   # needs WeasyPrint, else falls back to HTML
+python -m bac_hunter.cli report --output report.sarif # SARIF for CI integrations
 ```
 
 ## 🧠 Intelligent Target Profiling
@@ -103,4 +110,7 @@ docker run --rm -p 8000:8000 bac-hunter python -m bac_hunter.cli dashboard --hos
 
 ## ⚠️ Safety and Ethics
 - Built for respectful, low-noise scanning; obey robots.txt by default
+- Rate limiting enforced by mode; caps cannot be fully disabled
+- Automatic stop on excessive error rate
+- Confirmation prompt for maximum mode
 - Use only on systems you are authorized to test

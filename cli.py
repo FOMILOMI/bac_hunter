@@ -4,7 +4,8 @@ import logging
 from typing import List
 import typer
 
-from .config import Settings
+from .config import Settings, Identity
+from .modes import get_mode_profile
 from .logging_setup import setup_logging
 from .http_client import HttpClient
 from .storage import Storage
@@ -22,7 +23,7 @@ from .profiling import TargetProfiler
 from .webapp import app as dashboard_app
 import uvicorn
 
-app = typer.Typer(add_completion=False, help="BAC-HUNTER - Non-aggressive recon & BAC groundwork")
+app = typer.Typer(add_completion=False, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
 
 
 @app.command()
@@ -177,6 +178,314 @@ def scan(
                         pass
         finally:
             await http.close()
+    asyncio.run(run_all())
+
+
+@app.command(help="Unified full scan: recon -> access -> audit -> exploit -> analyze")
+def scan_full(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains (comma-separated supported)"),
+    mode: str = typer.Option("standard", "--mode", help="stealth|standard|aggressive|maximum"),
+    identities_yaml: str = typer.Option("", help="Identities file for multi-identity tests"),
+    auth_name: str = typer.Option("", help="Authenticated identity name (optional)"),
+    custom_rps: float = typer.Option(0.0, help="Override global RPS for the selected mode"),
+    max_urls: int = typer.Option(0, help="Override URL limits per phase for the selected mode"),
+    timeout: int = typer.Option(0, help="Override per-phase timeout (minutes)"),
+    exclude_phases: List[str] = typer.Option([], help="Comma-separated phases to skip (e.g., recon,exploit)"),
+    include_only: List[str] = typer.Option([], help="Comma-separated phases to run only (e.g., recon,access)"),
+    report: str = typer.Option("", help="Optional report path (html|csv|json|sarif)"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    """Complete pipeline with chosen mode and safety controls."""
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    sm = SessionManager()
+    # Parse targets (allow comma-separated inside a single arg)
+    targets: List[str] = []
+    for t in target:
+        parts = [x.strip() for x in t.split(",") if x.strip()]
+        targets.extend(parts)
+    settings.targets = targets
+
+    if identities_yaml:
+        try:
+            sm.load_yaml(identities_yaml)
+        except Exception as e:
+            typer.echo(f"[warn] failed to load identities yaml: {e}")
+    unauth = sm.get("anon")
+    auth = sm.get(auth_name) if auth_name else None
+
+    # Apply mode profile
+    profile = get_mode_profile(mode)
+    if custom_rps and custom_rps > 0:
+        settings.max_rps = custom_rps
+        settings.per_host_rps = max(0.25, custom_rps / 2.0)
+    else:
+        settings.max_rps = profile.global_rps
+        settings.per_host_rps = profile.per_host_rps
+
+    per_phase_max = max_urls if max_urls > 0 else None
+    phase_timeout = timeout if timeout > 0 else profile.phase_timeout_min
+
+    # Phase selection
+    all_phases = ["recon", "access", "audit", "exploit", "analyze"]
+    # Normalize comma-separated lists
+    def _explode(items: List[str]) -> List[str]:
+        out: List[str] = []
+        for it in items:
+            out.extend([x.strip() for x in it.split(",") if x.strip()])
+        return out
+    include_only = _explode(include_only)
+    exclude_phases = _explode(exclude_phases)
+    chosen = all_phases
+    if include_only:
+        chosen = [p for p in all_phases if p in include_only]
+    if exclude_phases:
+        chosen = [p for p in chosen if p not in exclude_phases]
+
+    # Safety: confirm for maximum
+    if mode.lower() == "maximum":
+        if not typer.confirm("Maximum mode is noisy. Do you have authorization?", default=False):
+            raise typer.Exit(1)
+
+    typer.echo(f"\n🎯 BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
+    typer.echo(f"Targets: {', '.join(settings.targets)}")
+    typer.echo(f"Mode: {profile.name} | RPS: {settings.max_rps:.2f} | Timeout: {phase_timeout}min\n")
+
+    async def run_all():
+        http = HttpClient(settings)
+        profiler = TargetProfiler(settings, http)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                # Phase 1: Recon
+                if "recon" in chosen:
+                    typer.echo("Phase 1/5: RECONNAISSANCE ...")
+                    plugins = [RobotsRecon(settings, http, db), SitemapRecon(settings, http, db)]
+                    if profile.name != "STEALTH":
+                        plugins.append(JSEndpointsRecon(settings, http, db))
+                        plugins.append(SmartEndpointDetector(settings, http, db))
+                    async def _run_recon():
+                        for p in plugins:
+                            try:
+                                await p.run(base, tid)
+                            except Exception:
+                                pass
+                    try:
+                        await asyncio.wait_for(_run_recon(), timeout=phase_timeout * 60)
+                    except asyncio.TimeoutError:
+                        typer.echo("[timeout] recon phase exceeded time budget")
+
+                # Phase 2: Access
+                if "access" in chosen and auth is not None:
+                    typer.echo("Phase 2/5: ACCESS TESTING ...")
+                    diff = DifferentialTester(settings, http, db)
+                    idor = IDORProbe(settings, http, db)
+                    fb = ForceBrowser(settings, http, db)
+                    urls = list(dict.fromkeys(db.iter_target_urls(tid)))
+                    limit = per_phase_max or profile.access_max_urls
+                    urls = urls[: limit]
+                    async def _run_access():
+                        for idx, u in enumerate(urls, start=1):
+                            try:
+                                await diff.compare_identities(u, unauth, auth)
+                                await idor.test(base, u, unauth, auth)
+                            except Exception:
+                                continue
+                            # progress + safety checks
+                            if idx % 10 == 0:
+                                st = http.stats.scan_stats
+                                total = st.total_requests
+                                fail_rate = (st.failed_requests / max(1, total))
+                                if total >= profile.request_cap or fail_rate > profile.stop_on_error_rate:
+                                    typer.echo("[safety] stopping access phase due to caps/error rate")
+                                    break
+                        if profile.name in ("STANDARD", "AGGRESSIVE", "MAXIMUM"):
+                            await fb.try_paths(urls[: min(50, limit)], unauth, auth)
+                    try:
+                        await asyncio.wait_for(_run_access(), timeout=phase_timeout * 60)
+                    except asyncio.TimeoutError:
+                        typer.echo("[timeout] access phase exceeded time budget")
+                    # Multi-identity comparison (maximum): compare across all provided identities
+                    if profile.name == "MAXIMUM":
+                        idents = [i for i in sm.all() if i.name != "anon"]
+                        pairs = []
+                        for i in range(len(idents)):
+                            for j in range(i + 1, len(idents)):
+                                pairs.append((idents[i], idents[j]))
+                        sample_urls = urls[: min(40, len(urls))]
+                        async def _run_multi_cmp():
+                            for a, b in pairs:
+                                for u in sample_urls:
+                                    try:
+                                        await diff.compare_identities(u, a, b)
+                                    except Exception:
+                                        continue
+                        try:
+                            await asyncio.wait_for(_run_multi_cmp(), timeout=max(60, int(0.5 * phase_timeout) * 60))
+                        except asyncio.TimeoutError:
+                            typer.echo("[timeout] multi-identity comparison exceeded time budget")
+
+                # Phase 3: Audit
+                if "audit" in chosen:
+                    typer.echo("Phase 3/5: AUDIT ...")
+                    headers = HeaderInspector(settings, http, db)
+                    toggles = ParamToggle(settings, http, db)
+                    urls = list(dict.fromkeys(db.iter_target_urls(tid)))
+                    limit = per_phase_max or profile.audit_max_urls
+                    urls = urls[: limit]
+                    async def _run_audit():
+                        await headers.run(urls, auth or unauth)
+                        if profile.name != "STEALTH":
+                            await toggles.run(urls, auth or unauth)
+                    try:
+                        await asyncio.wait_for(_run_audit(), timeout=phase_timeout * 60)
+                    except asyncio.TimeoutError:
+                        typer.echo("[timeout] audit phase exceeded time budget")
+
+                # Phase 4: Exploit (safe)
+                if "exploit" in chosen and profile.allow_exploitation:
+                    typer.echo("Phase 4/5: EXPLOIT (safe) ...")
+                    pet = PrivilegeEscalationTester(settings, http, db)
+                    miner = ParameterMiner(settings, http, db)
+                    await pet.test_admin_endpoints(base, unauth)
+                    urls = list(dict.fromkeys(db.iter_target_urls(tid)))
+                    limit = per_phase_max or profile.exploit_max_urls
+                    urls = urls[: min(80, limit)]
+                    async def _run_exploit():
+                        for idx, u in enumerate(urls, start=1):
+                            await miner.mine_parameters(u, unauth, max_params=10 if profile.name != "MAXIMUM" else 20)
+                            if idx % 10 == 0:
+                                st = http.stats.scan_stats
+                                total = st.total_requests
+                                fail_rate = (st.failed_requests / max(1, total))
+                                if total >= profile.request_cap or fail_rate > profile.stop_on_error_rate:
+                                    typer.echo("[safety] stopping exploit phase due to caps/error rate")
+                                    break
+                    try:
+                        await asyncio.wait_for(_run_exploit(), timeout=phase_timeout * 60)
+                    except asyncio.TimeoutError:
+                        typer.echo("[timeout] exploit phase exceeded time budget")
+
+                # Phase 5: Analyze + report optional summary line
+                if "analyze" in chosen:
+                    from .advanced import VulnerabilityAnalyzer
+                    va = VulnerabilityAnalyzer(db)
+                    _ = va.analyze()
+
+        finally:
+            await http.close()
+
+    asyncio.run(run_all())
+
+    # Final summary and optional report
+    high = med = low = total = 0
+    for _, _, _, _, score in db.iter_findings():
+        total += 1
+        if score >= 0.75:
+            high += 1
+        elif score >= 0.4:
+            med += 1
+        else:
+            low += 1
+    typer.echo(f"\n📊 Final Results: {total} findings | High: {high} | Medium: {med} | Low: {low}")
+    if report:
+        ex = Exporter(db)
+        rp = report.lower()
+        if rp.endswith('.csv'):
+            path = ex.to_csv(report)
+        elif rp.endswith('.json'):
+            path = ex.to_json(report)
+        elif rp.endswith('.sarif'):
+            path = ex.to_sarif(report)
+        elif rp.endswith('.pdf'):
+            path = ex.to_pdf(report)
+        else:
+            path = ex.to_html(report)
+        typer.echo(f"📄 Report generated: {path}")
+
+
+@app.command(help="Fast assessment with 30-minute default time cap")
+def scan_quick(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    mode: str = typer.Option("standard", "--mode"),
+    timeout: int = typer.Option(30, help="Global time cap minutes"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    # Use mode just for RPS tuning
+    profile = get_mode_profile(mode)
+    settings.max_rps = profile.global_rps
+    settings.per_host_rps = profile.per_host_rps
+    # Parse targets
+    settings.targets = []
+    for t in target:
+        settings.targets.extend([x.strip() for x in t.split(",") if x.strip()])
+
+    typer.echo(f"Quick scan | Mode: {profile.name} | Timeout: {timeout}min")
+
+    async def run_all():
+        http = HttpClient(settings)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                # Minimal recon + access sample
+                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), SmartEndpointDetector(settings, http, db)):
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
+                # Cap URLs low for speed
+                urls = list(dict.fromkeys(db.iter_target_urls(tid)))[:50]
+                headers = HeaderInspector(settings, http, db)
+                await headers.run(urls, Identity(name="anon"))  # type: ignore[name-defined]
+        finally:
+            await http.close()
+
+    asyncio.run(run_all())
+
+
+@app.command(help="Custom phase selection: --phases recon,audit etc")
+def scan_custom(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    phases: List[str] = typer.Option([], "--phases", help="Comma-separated phases"),
+    mode: str = typer.Option("standard", "--mode"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    profile = get_mode_profile(mode)
+    settings.max_rps = profile.global_rps
+    settings.per_host_rps = profile.per_host_rps
+    # Parse targets and phases
+    settings.targets = []
+    for t in target:
+        settings.targets.extend([x.strip() for x in t.split(",") if x.strip()])
+    chosen = []
+    for p in phases:
+        chosen.extend([x.strip() for x in p.split(",") if x.strip()])
+
+    async def run_all():
+        http = HttpClient(settings)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                if "recon" in chosen:
+                    for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db), SmartEndpointDetector(settings, http, db)):
+                        try:
+                            await p.run(base, tid)
+                        except Exception:
+                            pass
+                if "audit" in chosen:
+                    headers = HeaderInspector(settings, http, db)
+                    urls = list(dict.fromkeys(db.iter_target_urls(tid)))[:profile.audit_max_urls]
+                    await headers.run(urls, Identity(name="anon"))  # type: ignore[name-defined]
+        finally:
+            await http.close()
+
     asyncio.run(run_all())
 
 
@@ -446,7 +755,7 @@ def audit(
 
 @app.command()
 def report(
-    output: str = typer.Option("report.html", help="report.html | findings.csv | report.json"),
+    output: str = typer.Option("report.html", help="report.html | findings.csv | report.json | report.sarif"),
     verbose: int = typer.Option(0, "-v"),
 ):
     """Export findings to HTML or CSV or JSON."""
@@ -458,6 +767,8 @@ def report(
         path = ex.to_csv(output)
     elif output.lower().endswith(".json"):
         path = ex.to_json(output)
+    elif output.lower().endswith(".sarif"):
+        path = ex.to_sarif(output)
     else:
         path = ex.to_html(output)
     typer.echo(f"[ok] wrote {path}")
