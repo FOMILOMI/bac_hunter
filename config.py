@@ -60,3 +60,26 @@ class Settings:
     enable_recon_robots: bool = True
     enable_recon_sitemap: bool = True
     enable_recon_js_endpoints: bool = True
+
+    # Adaptive throttling and safety
+    enable_adaptive_throttle: bool = _env("BH_ADAPTIVE_THROTTLE", "true").lower() == "true"
+    enable_waf_detection: bool = _env("BH_WAF_DETECT", "true").lower() == "true"
+
+    # User-Agent rotation / request randomization
+    enable_ua_rotation: bool = _env("BH_UA_ROTATE", "true").lower() == "true"
+    ua_rotate_per_request: bool = _env("BH_UA_ROTATE_PER_REQ", "false").lower() == "true"
+
+    # Caching (in-memory, GET only)
+    cache_enabled: bool = _env("BH_CACHE", "true").lower() == "true"
+    cache_ttl_seconds: int = int(_env("BH_CACHE_TTL", "300"))
+    cache_max_entries: int = int(_env("BH_CACHE_MAX", "2000"))
+
+    # CORS probing (extra single GET with Origin header)
+    enable_cors_probe: bool = _env("BH_CORS_PROBE", "false").lower() == "true"
+    cors_probe_origin: str = _env("BH_CORS_ORIGIN", "https://evil.bac-hunter.invalid")
+
+    # Notifications / webhooks
+    generic_webhook: Optional[str] = _env("BH_GENERIC_WEBHOOK") or None
+    slack_webhook: Optional[str] = _env("BH_SLACK_WEBHOOK") or None
+    discord_webhook: Optional[str] = _env("BH_DISCORD_WEBHOOK") or None
+    notify_min_severity: float = float(_env("BH_NOTIFY_MIN", "0.75"))

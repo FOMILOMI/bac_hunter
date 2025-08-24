@@ -1,7 +1,7 @@
 from __future__ import annotations
 import logging
 import re
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import urlparse, urlunparse, urlencode, parse_qsl
 from typing import List
 
 from ..config import Identity, Settings
@@ -44,7 +44,28 @@ class IDORProbe:
         q2 = ID_RE.sub(lambda m: str(max(0, int(m.group("id")) + 1)), q, count=1)
         if q2 != q:
             out.append(urlunparse(parsed._replace(query=q2)))
-        return out[:max_variants]
+        # duplicate last path segment (common list/detail pattern)
+        segs = [s for s in path.split('/') if s]
+        if segs:
+            dup = '/' + '/'.join(segs + [segs[-1]])
+            if dup != path:
+                out.append(urlunparse(parsed._replace(path=dup)))
+        # boolean flips in query
+        params = parse_qsl(parsed.query, keep_blank_values=True)
+        for i, (k, v) in enumerate(params):
+            lv = (v or '').lower()
+            if lv in ("true", "false", "1", "0", "yes", "no"):
+                new = params.copy()
+                new[i] = (k, "false" if lv in ("true", "1", "yes") else "true")
+                out.append(urlunparse(parsed._replace(query=urlencode(new, doseq=True))))
+                break
+        # uniq and cap
+        uniq = []
+        seen = set()
+        for u in out:
+            if u not in seen:
+                seen.add(u); uniq.append(u)
+        return uniq[:max_variants]
 
     async def test(self, base_url: str, url: str, low_priv: Identity, other_priv: Identity) -> None:
         r0 = await self.http.get(url, headers=low_priv.headers())
@@ -57,5 +78,6 @@ class IDORProbe:
             diff = self.cmp.compare(r0.status_code, len(r0.content), r0.headers.get("content-type"), None,
                                     rv.status_code, len(rv.content), rv.headers.get("content-type"), None)
             if rv.status_code in (200, 206) and (not diff.same_status or not diff.same_length_bucket):
-                self.db.add_finding_for_url(v, type_="idor_suspect", evidence=f"baseline->{rv.status_code} diff={diff.hint}", score=0.75)
+                hint = f"baseline->{rv.status_code} diff={diff.hint} other={ro.status_code}"
+                self.db.add_finding_for_url(v, type_="idor_suspect", evidence=hint, score=0.75)
                 log.info("IDOR candidate: %s", v)

@@ -67,6 +67,21 @@ class HeaderInspector:
                 issues.append(("Missing HSTS on HTTPS origin", 0.3))
         return issues
 
+    async def _active_cors_probe(self, url: str, ident: Identity):
+        if not self.s.enable_cors_probe:
+            return
+        origin = self.s.cors_probe_origin
+        try:
+            r = await self.http.get(url, headers={**ident.headers(), "Origin": origin})
+        except Exception:
+            return
+        hd = self._lower(dict(r.headers))
+        acao = hd.get("access-control-allow-origin")
+        acac = (hd.get("access-control-allow-credentials") or "").lower()
+        if acao and (acao == origin or acao == "*"):
+            sev = 0.9 if acac == "true" else 0.6
+            self.db.add_finding_for_url(url, type_="cors_misconfig", evidence=f"Active CORS: ACAO={acao} ACAC={acac}", score=sev)
+
     async def run(self, urls: List[str], ident: Identity):
         for u in urls:
             try:
@@ -76,3 +91,5 @@ class HeaderInspector:
             hd = self._lower(dict(r.headers))
             for msg, score in self._check_cors(u, hd) + self._check_headers(u, hd):
                 self.db.add_finding_for_url(u, type_="weak_headers" if "CORS" not in msg else "cors_misconfig", evidence=msg, score=score)
+            # optional active probe
+            await self._active_cors_probe(u, ident)
