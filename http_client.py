@@ -19,7 +19,7 @@ class HttpClient:
     def __init__(self, settings: Settings):
         self.s = settings
         limits = httpx.Limits(max_connections=settings.max_concurrency, max_keepalive_connections=settings.max_concurrency)
-        self._client = httpx.AsyncClient(timeout=self.s.timeout_seconds, trust_env=True, limits=limits, proxies=self.s.proxy)
+        self._client = httpx.AsyncClient(timeout=self.s.timeout_seconds, trust_env=True, proxy=self.s.proxy, limits=limits)
         self._rl = RateLimiter(self.s.max_rps, self.s.per_host_rps)
         self._sem = asyncio.Semaphore(self.s.max_concurrency)
         self._stats = StatsCollector()
@@ -138,4 +138,5 @@ class HttpClient:
 
     async def delete(self, url: str, headers: Optional[dict] = None) -> httpx.Response:
         return await self._request("DELETE", url, headers=headers)
+
 
