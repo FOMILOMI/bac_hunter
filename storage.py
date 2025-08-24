@@ -77,8 +77,8 @@ class Storage:
     def ensure_target(self, base_url: str) -> int:
         with self.conn() as c:
             c.execute("INSERT OR IGNORE INTO targets(base_url) VALUES (?)", (base_url,))
-            c.execute("SELECT id FROM targets WHERE base_url=?", (base_url,))
-            row = c.fetchone()
+            cur = c.execute("SELECT id FROM targets WHERE base_url=?", (base_url,))
+            row = cur.fetchone()
             return int(row[0])
 
     def save_page(self, target_id: int, url: str, status: int, content_type: str | None, body: bytes | None):
@@ -117,11 +117,11 @@ class Storage:
 
     def add_finding_for_url(self, url: str, type_: str, evidence: str, score: float = 0.0):
         with self.conn() as c:
-            c.execute(
+            cur = c.execute(
                 "SELECT id FROM targets WHERE ? LIKE base_url || '%' ORDER BY LENGTH(base_url) DESC LIMIT 1",
                 (url,),
             )
-            row = c.fetchone()
+            row = cur.fetchone()
             target_id = row[0] if row else None
             if target_id is None:
                 from urllib.parse import urlparse

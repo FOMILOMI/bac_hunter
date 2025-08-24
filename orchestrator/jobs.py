@@ -55,11 +55,11 @@ class JobStore:
                 row = c.execute("SELECT id FROM jobs WHERE idempotency_key=?", (idempotency_key,)).fetchone()
                 if row:
                     return int(row[0])
-            c.execute(
+            cur = c.execute(
                 "INSERT INTO jobs(spec, priority, idempotency_key, max_retries, available_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)",
                 (json.dumps(spec), priority, idempotency_key, max_retries)
             )
-            return c.lastrowid
+            return int(cur.lastrowid)
 
     def claim_job(self, worker_name: str) -> Optional[Tuple[int, Dict[str, Any]]]:
         # atomic claim: pick lowest priority, oldest pending, available for execution
@@ -71,11 +71,11 @@ class JobStore:
             if not row:
                 return None
             jid, spec = row
-            c.execute(
+            cur = c.execute(
                 "UPDATE jobs SET status='running', worker=?, updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'", 
                 (worker_name, jid)
             )
-            if c.rowcount == 0:
+            if cur.rowcount == 0:
                 return None
             return jid, json.loads(spec)
 
