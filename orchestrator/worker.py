@@ -29,7 +29,7 @@ class Worker:
         self.http = HttpClient(settings)
         self.sm = SessionManager()
         self.scope = ScopeGuard(allowed_domains=self.settings.allowed_domains, blocked_patterns=self.settings.blocked_url_patterns)
-        self.alerter = AlertManager()
+        self.alerter = AlertManager(settings.generic_webhook, settings.slack_webhook, settings.discord_webhook)
         self._stop = False
 
     async def shutdown(self):
@@ -183,7 +183,8 @@ class Worker:
                 if int(status) in (200, 206):
                     # Notify potential broadened surface
                     try:
-                        await self.alerter.send("Accessible endpoint", f"httpx 200 on {url}", 0.4, url)
+                        if self.settings.notify_min_severity <= 0.4:
+                            await self.alerter.send("Accessible endpoint", f"httpx 200 on {url}", 0.4, url)
                     except Exception:
                         pass
         else:

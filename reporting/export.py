@@ -4,6 +4,7 @@ import html
 from datetime import datetime
 from typing import Iterable, List
 import re
+import json
 
 from ..storage import Storage
 
@@ -34,9 +35,25 @@ class Exporter:
                 f"<tr><td>{i}</td><td>{self._escape(base)}</td><td>{self._escape(t)}</td><td><a href='{self._escape(u)}' target='_blank'>{self._escape(u)}</a></td><td>{self._escape(self._redact(e))}</td><td>{s:.2f}</td></tr>"
             )
         parts.append("</tbody></table>")
-        html = "".join(parts)
+        html_str = "".join(parts)
         with open(path, "w", encoding="utf-8") as f:
-            f.write(html)
+            f.write(html_str)
+        return path
+
+    def to_json(self, path: str = "report.json"):
+        with self.db.conn() as c:
+            rows = [
+                {
+                    "base": base,
+                    "type": t,
+                    "url": u,
+                    "evidence": self._redact(e),
+                    "score": float(s),
+                }
+                for (base, t, u, e, s) in c.execute("SELECT t.base_url, f.type, f.url, f.evidence, f.score FROM findings f JOIN targets t ON f.target_id=t.id ORDER BY f.score DESC, f.id DESC")
+            ]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"generated_at": datetime.utcnow().isoformat() + "Z", "findings": rows}, f, indent=2)
         return path
 
     def _escape(self, s: str) -> str:

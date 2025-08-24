@@ -18,7 +18,7 @@ from .integrations import SubfinderWrapper, PDHttpxWrapper
 from .exploitation.privilege_escalation import PrivilegeEscalationTester
 from .advanced.parameter_miner import ParameterMiner
 
-app = typer.Typer(add_completion=False, help="BAC-HUNTER â€" Non-aggressive recon & BAC groundwork")
+app = typer.Typer(add_completion=False, help="BAC-HUNTER - Non-aggressive recon & BAC groundwork")
 
 
 @app.command()
@@ -230,16 +230,18 @@ def audit(
 
 @app.command()
 def report(
-    output: str = typer.Option("report.html", help="report.html | findings.csv"),
+    output: str = typer.Option("report.html", help="report.html | findings.csv | report.json"),
     verbose: int = typer.Option(0, "-v"),
 ):
-    """Export findings to HTML or CSV."""
+    """Export findings to HTML or CSV or JSON."""
     settings = Settings()
     setup_logging(verbose)
     db = Storage(settings.db_path)
     ex = Exporter(db)
     if output.lower().endswith(".csv"):
         path = ex.to_csv(output)
+    elif output.lower().endswith(".json"):
+        path = ex.to_json(output)
     else:
         path = ex.to_html(output)
     typer.echo(f"[ok] wrote {path}")
