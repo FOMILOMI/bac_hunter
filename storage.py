@@ -147,3 +147,27 @@ class Storage:
         with self.conn() as c:
             for (tid, base) in c.execute("SELECT id, base_url FROM targets ORDER BY id ASC"):
                 yield tid, base
+
+    # Maintenance utilities
+    def prune_to_max_size(self, max_bytes: int = 500 * 1024 * 1024):
+        """Prune large tables to keep DB near max_bytes. Drops oldest rows first.
+        Note: SQLite file size may not shrink immediately; caller can run VACUUM.
+        """
+        import os
+        try:
+            size = os.path.getsize(self.path)
+        except Exception:
+            size = 0
+        if size <= max_bytes:
+            return
+        with self.conn() as c:
+            # Heuristic: delete oldest pages and probes in chunks
+            for table in ("pages", "probes"):
+                c.execute(f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} ORDER BY id ASC LIMIT 1000)")
+            # Also trim comparisons
+            c.execute("DELETE FROM comparisons WHERE id IN (SELECT id FROM comparisons ORDER BY id ASC LIMIT 1000)")
+            # Optional vacuum when severely above cap
+            try:
+                c.execute("VACUUM")
+            except Exception:
+                pass

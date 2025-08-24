@@ -49,3 +49,27 @@ class HttpClient:
                         raise
                     await asyncio.sleep(0.5 * (attempt + 1))
 
+    async def post(self, url: str, data: Optional[dict | str | bytes] = None, json: Optional[dict] = None, headers: Optional[dict] = None) -> httpx.Response:
+        host = host_of(url)
+        async with self._sem:
+            await self._rl.acquire(host)
+            await jitter(self.s.random_jitter_ms)
+            for attempt in range(self.s.retry_times + 1):
+                start = time.perf_counter()
+                try:
+                    r = await self._client.post(url, data=data, json=json, headers=headers)
+                    elapsed_ms = (time.perf_counter() - start) * 1000.0
+                    log.debug("POST %s -> %s", url, r.status_code)
+                    try:
+                        ident = (headers or {}).get("X-BH-Identity", "unknown")
+                    except Exception:
+                        ident = "unknown"
+                    self._stats.record_request(url=url, method="POST", status_code=r.status_code, response_time_ms=elapsed_ms, response_size=len(r.content), identity=ident)
+                    return r
+                except Exception as e:
+                    elapsed_ms = (time.perf_counter() - start) * 1000.0
+                    self._stats.record_request(url=url, method="POST", status_code=599, response_time_ms=elapsed_ms, response_size=0, identity="unknown")
+                    if attempt >= self.s.retry_times:
+                        raise
+                    await asyncio.sleep(0.5 * (attempt + 1))
+

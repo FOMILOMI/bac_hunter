@@ -21,6 +21,9 @@ class ExternalToolRunner:
         """تشغيل أداة خارجية مع ضوابط الأمان"""
         async with self.sem:
             try:
+                # Basic safety: Ensure binary exists
+                if shutil.which(cmd[0]) is None:
+                    return {'returncode': -1, 'error': f"tool-not-found:{cmd[0]}", 'success': False}
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     stdin=asyncio.subprocess.PIPE,
