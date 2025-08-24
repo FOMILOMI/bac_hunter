@@ -37,6 +37,11 @@ class HttpClient:
     async def close(self):
         await self._client.aclose()
 
+    @property
+    def stats(self) -> StatsCollector:
+        """Expose request statistics for orchestration safety controls and progress."""
+        return self._stats
+
     def _prepare_headers(self, headers: Optional[Dict[str, str]]) -> Dict[str, str]:
         h: Dict[str, str] = {}
         if headers:

@@ -104,6 +104,60 @@ class Exporter:
             # Fallback: write HTML and let user convert
             return self.to_html(path.replace('.pdf', '.html'))
 
+    def to_sarif(self, path: str = "report.sarif"):
+        """Export findings in SARIF v2.1.0 format for CI integrations."""
+        sarif = {
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "BAC-HUNTER",
+                            "informationUri": "https://example.invalid/bac-hunter",
+                            "rules": []
+                        }
+                    },
+                    "results": []
+                }
+            ]
+        }
+        rules_index = {}
+        with self.db.conn() as c:
+            rows = list(c.execute("SELECT t.base_url, f.type, f.url, f.evidence, f.score FROM findings f JOIN targets t ON f.target_id=t.id ORDER BY f.score DESC, f.id DESC"))
+        for (base, ftype, url, evidence, score) in rows:
+            rule_id = f"BH::{ftype}"
+            if rule_id not in rules_index:
+                rules_index[rule_id] = {
+                    "id": rule_id,
+                    "name": ftype,
+                    "shortDescription": {"text": f"{ftype}"},
+                    "help": {"text": "Broken Access Control related finding"}
+                }
+            level = "none"
+            if score >= 0.8:
+                level = "error"
+            elif score >= 0.5:
+                level = "warning"
+            else:
+                level = "note"
+            sarif["runs"][0]["results"].append({
+                "ruleId": rule_id,
+                "level": level,
+                "message": {"text": self._redact(evidence or "")},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {"uri": url}
+                        }
+                    }
+                ]
+            })
+        sarif["runs"][0]["tool"]["driver"]["rules"] = list(rules_index.values())
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(sarif, f, indent=2)
+        return path
+
     def _escape(self, s: str) -> str:
         return (
             (s or "")
