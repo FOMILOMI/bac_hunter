@@ -22,8 +22,49 @@ from .fallback import PathScanner, ParamScanner
 from .profiling import TargetProfiler
 from .webapp import app as dashboard_app
 import uvicorn
+from .advanced.auth_analyzer import AuthAnalyzer
 
 app = typer.Typer(add_completion=False, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
+@app.command(help="One-click neural smart auto scan: profile -> auth-discovery -> recon -> access (light)")
+def smart_auto(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    max_rps: float = typer.Option(2.0, help="Global RPS cap"),
+    proxy: str | None = typer.Option(None, help="Upstream HTTP proxy"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    settings = Settings()
+    settings.targets = target
+    settings.max_rps = max_rps
+    settings.proxy = proxy or settings.proxy
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    sm = SessionManager()
+    unauth = sm.get("anon")
+
+    async def run_all():
+        http = HttpClient(settings)
+        profiler = TargetProfiler(settings, http)
+        authaz = AuthAnalyzer(settings, http, db)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                prof = await profiler.profile(base, unauth)
+                typer.echo(f"[smart] {base} -> kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
+                # Auth discovery first
+                try:
+                    await AuthDiscoveryRecon(settings, http, db).run(base, tid)
+                    await authaz.analyze_auth_flow(base, unauth, unauth)
+                except Exception:
+                    pass
+                # Light recon
+                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), SmartEndpointDetector(settings, http, db)):
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
+        finally:
+            await http.close()
+    asyncio.run(run_all())
 
 
 @app.command()
@@ -104,6 +145,8 @@ def quickscan(
     async def run_all():
         http = HttpClient(settings)
         profiler = TargetProfiler(settings, http)
+        authaz = AuthAnalyzer(settings, http, db)
+        authaz = AuthAnalyzer(settings, http, db)
         pscan = PathScanner(settings, http, db)
         qscan = ParamScanner(settings, http, db)
         diff = DifferentialTester(settings, http, db)
@@ -120,6 +163,11 @@ def quickscan(
                         await p.run(base, tid)
                     except Exception:
                         pass
+                # Advanced auth analysis snapshot
+                try:
+                    await authaz.analyze_auth_flow(base, unauth, auth)
+                except Exception:
+                    pass
                 # Fallback scans regardless of externals
                 await pscan.run(base, unauth)
                 if auth is not None:
@@ -165,6 +213,7 @@ def scan(
     async def run_all():
         http = HttpClient(settings)
         profiler = TargetProfiler(settings, http)
+        authaz = AuthAnalyzer(settings, http, db)
         try:
             for base in settings.targets:
                 tid = db.ensure_target(base)
@@ -179,6 +228,11 @@ def scan(
                         await p.run(base, tid)
                     except Exception:
                         pass
+                # Auth analysis snapshot
+                try:
+                    await authaz.analyze_auth_flow(base, unauth, auth)
+                except Exception:
+                    pass
         finally:
             await http.close()
     asyncio.run(run_all())
@@ -268,6 +322,7 @@ def scan_full(
                     if profile.name != "STEALTH":
                         plugins.append(JSEndpointsRecon(settings, http, db))
                         plugins.append(SmartEndpointDetector(settings, http, db))
+                        plugins.append(AuthDiscoveryRecon(settings, http, db))
                     async def _run_recon():
                         for p in plugins:
                             try:
@@ -278,6 +333,11 @@ def scan_full(
                         await asyncio.wait_for(_run_recon(), timeout=phase_timeout * 60)
                     except asyncio.TimeoutError:
                         typer.echo("[timeout] recon phase exceeded time budget")
+                    # Auth analysis snapshot
+                    try:
+                        await authaz.analyze_auth_flow(base, unauth, auth)
+                    except Exception:
+                        pass
 
                 # Phase 2: Access
                 if "access" in chosen and auth is not None:

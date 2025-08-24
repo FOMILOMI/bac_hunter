@@ -25,6 +25,14 @@ class AuthAnalyzer:
 			if resp.status_code == 200 and resp.text:
 				if "login" in resp.text.lower() or "signin" in resp.text.lower():
 					result["login_hint"] = "login-linked"
+					# record as auth hint
+					try:
+						from urllib.parse import urlparse
+						base = f"{urlparse(start).scheme}://{urlparse(start).netloc}"
+						tid = self.db.ensure_target(base)
+						self.db.add_auth_hint(tid, kind="auth_login", url=start, evidence="homepage contains login/signin", score=0.5)
+					except Exception:
+						pass
 		except Exception:
 			pass
 		# 2) Session token hint and heuristic sniffing of Set-Cookie/JWT
@@ -70,6 +78,13 @@ class AuthAnalyzer:
 				j = wk.json()
 				result["oauth"]["well_known"] = True
 				result["oauth"]["issuer"] = j.get('issuer')
+				try:
+					from urllib.parse import urlparse
+					base = f"{urlparse(start).scheme}://{urlparse(start).netloc}"
+					tid = self.db.ensure_target(base)
+					self.db.add_auth_hint(tid, kind="auth_oauth", url=start.rstrip('/') + '/.well-known/openid-configuration', evidence="OIDC well-known present", score=0.7, meta={"issuer": j.get('issuer', '')})
+				except Exception:
+					pass
 		except Exception:
 			pass
 		return result

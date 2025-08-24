@@ -54,6 +54,21 @@ CREATE TABLE IF NOT EXISTS comparisons(
 );
 """
 
+# Auth intelligence tables
+SCHEMA_AUTH = """
+CREATE TABLE IF NOT EXISTS auth_hints(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  target_id INTEGER,
+  kind TEXT,                -- e.g., auth_login, auth_oauth, saml, mfa, jwt_client_storage
+  url TEXT,
+  evidence TEXT,
+  meta TEXT,                -- JSON blob for extra context
+  score REAL DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_auth_hints_target ON auth_hints(target_id, kind);
+"""
+
 
 class Storage:
     def __init__(self, path: str):
@@ -64,6 +79,7 @@ class Storage:
         with self.conn() as c:
             c.executescript(SCHEMA)
             c.executescript(SCHEMA_ACCESS)
+            c.executescript(SCHEMA_AUTH)
 
     @contextmanager
     def conn(self):
@@ -178,3 +194,21 @@ class Storage:
                 c.execute("VACUUM")
             except Exception:
                 pass
+
+    # Auth intelligence helpers
+    def add_auth_hint(self, target_id: int, kind: str, url: str, evidence: str, score: float = 0.0, meta: Optional[dict] = None):
+        import json as _json
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO auth_hints(target_id,kind,url,evidence,meta,score) VALUES (?,?,?,?,?,?)",
+                (target_id, kind, url, evidence, _json.dumps(meta or {}), score),
+            )
+
+    def iter_auth_hints(self, target_id: Optional[int] = None):
+        with self.conn() as c:
+            if target_id is None:
+                cur = c.execute("SELECT target_id, kind, url, evidence, meta, score FROM auth_hints ORDER BY id DESC")
+            else:
+                cur = c.execute("SELECT target_id, kind, url, evidence, meta, score FROM auth_hints WHERE target_id=? ORDER BY id DESC", (target_id,))
+            for row in cur:
+                yield row

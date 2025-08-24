@@ -65,6 +65,16 @@ class AuthDiscoveryRecon(Plugin):
             if PASSWORD_INPUT_RE.search(inner):
                 collected.add(urljoin(base_url, action))
 
+        # Client-side storage token hints (basic scan)
+        try:
+            if text:
+                if re.search(r"localStorage\.(get|set)Item\(['\"](token|jwt|auth|session)['\"]", text, re.IGNORECASE):
+                    self.db.add_auth_hint(target_id, kind="jwt_client_storage", url=start_url, evidence="localStorage token pattern", score=0.4)
+                if re.search(r"sessionStorage\.(get|set)Item\(['\"](token|jwt|auth|session)['\"]", text, re.IGNORECASE):
+                    self.db.add_auth_hint(target_id, kind="jwt_client_storage", url=start_url, evidence="sessionStorage token pattern", score=0.35)
+        except Exception:
+            pass
+
         # Well-known endpoints probing
         for path in WELL_KNOWN:
             collected.add(urljoin(base_url, path))
@@ -87,12 +97,16 @@ class AuthDiscoveryRecon(Plugin):
             lt = u.lower()
             if any(x in lt for x in ("openid-configuration", "oauth-authorization-server", "/oauth", "/sso", "/auth/")):
                 self.db.add_finding(target_id, "auth_oauth_endpoint", u, evidence="auth-discovery", score=0.7)
+                self.db.add_auth_hint(target_id, kind="auth_oauth", url=u, evidence="discovered oauth/oidc", score=0.7)
             elif any(x in lt for x in ("reset", "forgot")):
                 self.db.add_finding(target_id, "auth_password_reset", u, evidence="auth-discovery", score=0.5)
+                self.db.add_auth_hint(target_id, kind="auth_reset", url=u, evidence="password reset path", score=0.5)
             elif any(x in lt for x in ("register", "signup")):
                 self.db.add_finding(target_id, "auth_registration", u, evidence="auth-discovery", score=0.45)
+                self.db.add_auth_hint(target_id, kind="auth_register", url=u, evidence="registration path", score=0.45)
             else:
                 self.db.add_finding(target_id, "auth_login", u, evidence="auth-discovery", score=0.6)
+                self.db.add_auth_hint(target_id, kind="auth_login", url=u, evidence="login-like path", score=0.6)
 
         log.info("%s -> %d auth endpoints", self.name, len(confirmed))
         return sorted(confirmed)
