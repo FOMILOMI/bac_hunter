@@ -1,5 +1,8 @@
 
 from .jobs import JobStore
-from .worker import Worker
+try:
+	from .worker import Worker
+except Exception:
+	Worker = None  # type: ignore
 
 __all__ = ["JobStore", "Worker"]
