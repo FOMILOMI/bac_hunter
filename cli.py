@@ -10,7 +10,7 @@ from .logging_setup import setup_logging
 from .http_client import HttpClient
 from .storage import Storage
 from .session_manager import SessionManager
-from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector
+from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector, AuthDiscoveryRecon
 from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
 from .audit import HeaderInspector, ParamToggle
 from .reporting import Exporter
@@ -64,6 +64,8 @@ def recon(
                     plugins.append(JSEndpointsRecon(settings, http, db))
                 # Smart endpoint detection
                 plugins.append(SmartEndpointDetector(settings, http, db))
+                # Auth discovery
+                plugins.append(AuthDiscoveryRecon(settings, http, db))
 
                 for p in plugins:
                     try:
@@ -113,7 +115,7 @@ def quickscan(
                 prof = await profiler.profile(base, unauth)
                 typer.echo(f"[profile] kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
                 # Recon
-                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db), SmartEndpointDetector(settings, http, db)):
+                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db), SmartEndpointDetector(settings, http, db), AuthDiscoveryRecon(settings, http, db)):
                     try:
                         await p.run(base, tid)
                     except Exception:
@@ -171,6 +173,7 @@ def scan(
                 plugins = [RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db)]
                 if smart_mode:
                     plugins.append(SmartEndpointDetector(settings, http, db))
+                    plugins.append(AuthDiscoveryRecon(settings, http, db))
                 for p in plugins:
                     try:
                         await p.run(base, tid)
