@@ -10,7 +10,7 @@ from ..storage import Storage
 from ..http_client import HttpClient
 from ..monitoring.stats_collector import StatsCollector
 from ..reporting import Exporter
-from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon
+from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector
 
 app = FastAPI(title="BAC Hunter Dashboard", version="1.0")
 
@@ -112,7 +112,7 @@ async def run_scan(target: str = Query(..., description="Target base URL")):
 	try:
 		for base in settings.targets:
 			tid = _db.ensure_target(base)
-			plugins = [RobotsRecon(settings, http, _db), SitemapRecon(settings, http, _db), JSEndpointsRecon(settings, http, _db)]
+			plugins = [RobotsRecon(settings, http, _db), SitemapRecon(settings, http, _db), JSEndpointsRecon(settings, http, _db), SmartEndpointDetector(settings, http, _db)]
 			for p in plugins:
 				try:
 					await p.run(base, tid)

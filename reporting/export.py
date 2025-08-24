@@ -2,13 +2,19 @@ from __future__ import annotations
 import csv
 import html
 from datetime import datetime
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 import re
 import json
 
 from ..storage import Storage
 from ..monitoring.stats_collector import StatsCollector
 from ..recommendations import RecommendationsEngine
+
+try:
+    from jinja2 import Environment, FileSystemLoader  # type: ignore
+except Exception:
+    Environment = None  # type: ignore
+    FileSystemLoader = None  # type: ignore
 
 class Exporter:
     def __init__(self, storage: Storage):
@@ -23,7 +29,27 @@ class Exporter:
                 w.writerow([base, t, u, self._redact(e), s])
         return path
 
-    def to_html(self, path: str = "report.html"):
+    def to_html(self, path: str = "report.html", template_dir: Optional[str] = None, template_name: str = ""):
+        if template_dir and template_name and Environment and FileSystemLoader:
+            try:
+                env = Environment(loader=FileSystemLoader(template_dir), autoescape=True)
+                tpl = env.get_template(template_name)
+                with self.db.conn() as c:
+                    rows = list(c.execute("SELECT t.base_url, f.type, f.url, f.evidence, f.score FROM findings f JOIN targets t ON f.target_id=t.id ORDER BY f.score DESC, f.id DESC"))
+                ctx = {
+                    "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
+                    "findings": [
+                        {"base": base, "type": t, "url": u, "evidence": self._redact(e), "score": float(s)}
+                        for (base, t, u, e, s) in rows
+                    ],
+                }
+                html_str = tpl.render(**ctx)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(html_str)
+                return path
+            except Exception:
+                # Fallback to default HTML if templating fails
+                pass
         with self.db.conn() as c:
             rows = list(c.execute("SELECT t.base_url, f.type, f.url, f.evidence, f.score FROM findings f JOIN targets t ON f.target_id=t.id ORDER BY f.score DESC, f.id DESC"))
         now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
