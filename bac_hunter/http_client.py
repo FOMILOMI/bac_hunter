@@ -58,9 +58,10 @@ class HttpClient:
         if self.s.enable_ua_rotation:
             if self.s.ua_rotate_per_request or "User-Agent" not in h:
                 h["User-Agent"] = pick_ua()
-        # tag identity if not present
-        if "X-BH-Identity" not in h:
-            h["X-BH-Identity"] = headers.get("X-BH-Identity") if headers else "unknown"
+        # tag identity if not present; avoid None values
+        if "X-BH-Identity" not in h or h.get("X-BH-Identity") is None:
+            identity_val = (headers or {}).get("X-BH-Identity")
+            h["X-BH-Identity"] = identity_val or "unknown"
         return h
 
     def _cache_get(self, url: str) -> Optional[httpx.Response]:
@@ -157,5 +158,3 @@ class HttpClient:
 
     async def delete(self, url: str, headers: Optional[dict] = None) -> httpx.Response:
         return await self._request("DELETE", url, headers=headers)
-
-
