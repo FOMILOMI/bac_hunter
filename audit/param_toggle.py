@@ -3,10 +3,16 @@ import logging
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from typing import Dict, List
 
-from ..config import Settings, Identity
-from ..http_client import HttpClient
-from ..storage import Storage
-from ..access.comparator import ResponseComparator
+try:
+	from ..config import Settings, Identity
+	from ..http_client import HttpClient
+	from ..storage import Storage
+	from ..access.comparator import ResponseComparator
+except Exception:
+	from config import Settings, Identity
+	from http_client import HttpClient
+	from storage import Storage
+	from access.comparator import ResponseComparator
 
 log = logging.getLogger("audit.toggle")
 

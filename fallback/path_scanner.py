@@ -3,9 +3,14 @@ import asyncio
 from typing import List
 from urllib.parse import urljoin
 
-from ..config import Settings, Identity
-from ..http_client import HttpClient
-from ..storage import Storage
+try:
+	from ..config import Settings, Identity
+	from ..http_client import HttpClient
+	from ..storage import Storage
+except Exception:
+	from config import Settings, Identity
+	from http_client import HttpClient
+	from storage import Storage
 
 
 class PathScanner:

@@ -5,12 +5,20 @@ from typing import Optional, Dict, Any
 import httpx
 import time
 
-from .config import Settings
-from .rate_limiter import RateLimiter, AdaptiveRateLimiter
-from .utils import host_of, jitter, pick_ua
-from .monitoring.stats_collector import StatsCollector
-from .safety.throttle_calibrator import ThrottleCalibrator
-from .safety.waf_detector import WAFDetector
+try:
+    from .config import Settings
+    from .rate_limiter import RateLimiter, AdaptiveRateLimiter
+    from .utils import host_of, jitter, pick_ua
+    from .monitoring.stats_collector import StatsCollector
+    from .safety.throttle_calibrator import ThrottleCalibrator
+    from .safety.waf_detector import WAFDetector
+except Exception:  # fallback when imported as top-level module
+    from config import Settings
+    from rate_limiter import RateLimiter, AdaptiveRateLimiter
+    from utils import host_of, jitter, pick_ua
+    from monitoring.stats_collector import StatsCollector
+    from safety.throttle_calibrator import ThrottleCalibrator
+    from safety.waf_detector import WAFDetector
 
 log = logging.getLogger("http")
 

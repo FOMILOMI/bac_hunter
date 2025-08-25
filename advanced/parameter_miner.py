@@ -5,9 +5,14 @@ from typing import Dict, List, Set, Optional, Tuple
 from urllib.parse import urlencode, parse_qs, urlparse
 import re
 
-from ..config import Settings, Identity
-from ..http_client import HttpClient
-from ..storage import Storage
+try:
+	from ..config import Settings, Identity
+	from ..http_client import HttpClient
+	from ..storage import Storage
+except Exception:
+	from config import Settings, Identity
+	from http_client import HttpClient
+	from storage import Storage
 
 log = logging.getLogger("advanced.params")
 

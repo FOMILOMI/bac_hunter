@@ -3,9 +3,14 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from ..config import Settings, Identity
-from ..http_client import HttpClient
-from ..storage import Storage
+try:
+	from ..config import Settings, Identity
+	from ..http_client import HttpClient
+	from ..storage import Storage
+except Exception:
+	from config import Settings, Identity
+	from http_client import HttpClient
+	from storage import Storage
 
 
 @dataclass

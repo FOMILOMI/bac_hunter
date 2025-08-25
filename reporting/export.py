@@ -6,9 +6,14 @@ from typing import Iterable, List, Optional
 import re
 import json
 
-from ..storage import Storage
-from ..monitoring.stats_collector import StatsCollector
-from ..recommendations import RecommendationsEngine
+try:
+	from ..storage import Storage
+	from ..monitoring.stats_collector import StatsCollector
+	from ..recommendations import RecommendationsEngine
+except Exception:
+	from storage import Storage
+	from monitoring.stats_collector import StatsCollector
+	from recommendations import RecommendationsEngine
 
 try:
     from jinja2 import Environment, FileSystemLoader  # type: ignore

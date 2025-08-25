@@ -2,9 +2,14 @@ from __future__ import annotations
 import logging
 from typing import Iterable
 
-from ..config import Identity, Settings
-from ..http_client import HttpClient
-from ..storage import Storage
+try:
+	from ..config import Identity, Settings
+	from ..http_client import HttpClient
+	from ..storage import Storage
+except Exception:
+	from config import Identity, Settings
+	from http_client import HttpClient
+	from storage import Storage
 
 log = logging.getLogger("access.fb")
 

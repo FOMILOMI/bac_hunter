@@ -1,8 +1,8 @@
-
-from .jobs import JobStore
 try:
+	from .jobs import JobStore
 	from .worker import Worker
 except Exception:
-	Worker = None  # type: ignore
+	from orchestrator.jobs import JobStore
+	from orchestrator.worker import Worker
 
 __all__ = ["JobStore", "Worker"]

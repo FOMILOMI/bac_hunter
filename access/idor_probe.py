@@ -4,10 +4,16 @@ import re
 from urllib.parse import urlparse, urlunparse, urlencode, parse_qsl
 from typing import List
 
-from ..config import Identity, Settings
-from ..http_client import HttpClient
-from ..storage import Storage
-from .comparator import ResponseComparator
+try:
+	from ..config import Identity, Settings
+	from ..http_client import HttpClient
+	from ..storage import Storage
+	from .comparator import ResponseComparator
+except Exception:
+	from config import Identity, Settings
+	from http_client import HttpClient
+	from storage import Storage
+	from access.comparator import ResponseComparator
 
 log = logging.getLogger("access.idor")
 

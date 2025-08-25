@@ -6,8 +6,14 @@ from typing import List, Dict, Set
 from pathlib import Path
 import shutil
 
-from .external_tools import ExternalToolRunner
-from ..storage import Storage
+try:
+    from .external_tools import ExternalToolRunner
+except Exception:
+    from integrations.external_tools import ExternalToolRunner
+try:
+	from ..storage import Storage
+except Exception:
+	from storage import Storage
 
 log = logging.getLogger("integrations.dirsearch")
 
@@ -98,8 +104,12 @@ class DirsearchWrapper:
     
     async def _fallback_path_scan(self, target: str) -> List[str]:
         """فحص بديل بدون dirsearch"""
-        from ..http_client import HttpClient
-        from ..config import Settings
+        try:
+            from ..http_client import HttpClient
+            from ..config import Settings
+        except Exception:
+            from http_client import HttpClient
+            from config import Settings
         
         settings = Settings()
         http = HttpClient(settings)

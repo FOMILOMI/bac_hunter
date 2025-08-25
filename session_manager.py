@@ -1,7 +1,11 @@
 from __future__ import annotations
 from typing import Dict, Optional
-from .config import Identity
-from .utils import pick_ua
+try:
+    from .config import Identity
+    from .utils import pick_ua
+except Exception:
+    from config import Identity
+    from utils import pick_ua
 
 
 class SessionManager:

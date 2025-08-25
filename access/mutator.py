@@ -3,10 +3,16 @@ import logging
 from typing import Dict, List, Tuple
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
-from ..config import Identity, Settings
-from ..http_client import HttpClient
-from ..storage import Storage
-from .comparator import ResponseComparator
+try:
+	from ..config import Identity, Settings
+	from ..http_client import HttpClient
+	from ..storage import Storage
+	from .comparator import ResponseComparator
+except Exception:
+	from config import Identity, Settings
+	from http_client import HttpClient
+	from storage import Storage
+	from access.comparator import ResponseComparator
 
 log = logging.getLogger("access.mutator")
 
