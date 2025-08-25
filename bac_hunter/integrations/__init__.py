@@ -18,3 +18,21 @@ __all__ = [
     "SubfinderWrapper",
     "PDHttpxWrapper",
 ]
+
+class CaptchaService:
+	"""Placeholder for CAPTCHA solving service integration."""
+
+	async def solve(self, site_key: str, url: str) -> str | None:
+		return None
+
+
+class SMSService:
+	"""Placeholder for SMS verification service integration."""
+
+	async def send(self, phone: str, message: str) -> bool:
+		return False
+
+__all__.extend([
+	"CaptchaService",
+	"SMSService",
+])
