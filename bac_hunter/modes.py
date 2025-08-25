@@ -1,7 +1,4 @@
-from __future__ import annotations
+from modes import ModeProfile, DEFAULT_MODES, get_mode_profile
 
-# Delegate to top-level implementation to avoid duplication
-from modes import ModeProfile, get_mode_profile, DEFAULT_MODES  # noqa: F401
-
-__all__ = ["ModeProfile", "get_mode_profile", "DEFAULT_MODES"]
+__all__ = ["ModeProfile", "DEFAULT_MODES", "get_mode_profile"]
 

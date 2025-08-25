@@ -1,3 +1,7 @@
+from cli import app  # re-export from top-level
+
+__all__ = ["app"]
+
 from __future__ import annotations
 
 # Import top-level cli module as a submodule to expose Typer app under bac_hunter.cli
