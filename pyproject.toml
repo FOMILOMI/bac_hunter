@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bac-hunter"
+version = "2.0.0"
+description = "BAC-HUNTER v2.0 - Comprehensive Broken Access Control assessment toolkit"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "BAC Hunter" }]
+dependencies = [
+    "httpx==0.27.0",
+    "typer==0.12.3",
+    "PyYAML==6.0.1",
+    "rich==13.7.1",
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.30.6",
+    "Jinja2==3.1.4",
+    "weasyprint==62.3",
+]
+
+[project.scripts]
+bac-hunter = "bac_hunter.cli:app"
+
+[project.entry-points."console_scripts"]
+bac-hunter = "bac_hunter.cli:app"
+

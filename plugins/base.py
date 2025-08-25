@@ -2,14 +2,9 @@ from __future__ import annotations
 import abc
 from typing import List
 
-try:
-	from ..config import Settings
-	from ..http_client import HttpClient
-	from ..storage import Storage
-except Exception:
-	from config import Settings
-	from http_client import HttpClient
-	from storage import Storage
+from ..bac_hunter.config import Settings
+from ..bac_hunter.core.http_client import HttpClient
+from ..bac_hunter.core.storage import Storage
 
 
 class Plugin(abc.ABC):

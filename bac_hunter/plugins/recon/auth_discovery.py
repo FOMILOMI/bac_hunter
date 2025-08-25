@@ -1,0 +1,91 @@
+from __future__ import annotations
+import logging
+import re
+from typing import List, Set
+from urllib.parse import urljoin
+
+from ...core.storage import Storage
+from ...core.http_client import HttpClient
+from ...config import Settings
+from ..base import Plugin
+
+
+log = logging.getLogger("recon.auth")
+
+
+LOGIN_HINT_RE = re.compile(r"\b(login|signin|sign-in|auth|account/login|user/login)\b", re.IGNORECASE)
+REGISTER_HINT_RE = re.compile(r"\b(register|signup|sign-up|create[-_ ]?account)\b", re.IGNORECASE)
+RESET_HINT_RE = re.compile(r"\b(reset|forgot[-_ ]?password|recover)\b", re.IGNORECASE)
+OAUTH_HINT_RE = re.compile(r"\b(oauth|openid|sso|saml)\b", re.IGNORECASE)
+
+FORM_ACTION_RE = re.compile(r"<form[^>]*action=[\"']([^\"'>\s]+)[\"'][^>]*>([\s\S]*?)</form>", re.IGNORECASE)
+PASSWORD_INPUT_RE = re.compile(r"<input[^>]*type=[\"']password[\"']", re.IGNORECASE)
+
+WELL_KNOWN = [
+    "/.well-known/openid-configuration",
+    "/.well-known/oauth-authorization-server",
+]
+
+
+class AuthDiscoveryRecon(Plugin):
+    name = "auth-discovery"
+    category = "recon"
+
+    async def run(self, base_url: str, target_id: int) -> List[str]:
+        collected: Set[str] = set()
+        start_url = base_url if base_url.endswith("/") else base_url + "/"
+
+        try:
+            r = await self.http.get(start_url)
+            self.db.save_page(target_id, start_url, r.status_code, r.headers.get("content-type"), r.content)
+            text = r.text or ""
+        except Exception as e:
+            log.debug("homepage fetch failed: %s", e)
+            text = ""
+
+        for m in re.finditer(r"href=[\"']([^\"'#>\s]+)[\"'][^>]*>([^<]{0,80})", text, re.IGNORECASE):
+            href, label = m.group(1), m.group(2)
+            label = label or ""
+            if LOGIN_HINT_RE.search(href) or LOGIN_HINT_RE.search(label):
+                collected.add(urljoin(base_url, href))
+            elif REGISTER_HINT_RE.search(href) or REGISTER_HINT_RE.search(label):
+                collected.add(urljoin(base_url, href))
+            elif RESET_HINT_RE.search(href) or RESET_HINT_RE.search(label):
+                collected.add(urljoin(base_url, href))
+            elif OAUTH_HINT_RE.search(href) or OAUTH_HINT_RE.search(label):
+                collected.add(urljoin(base_url, href))
+
+        for m in FORM_ACTION_RE.finditer(text):
+            action, inner = m.group(1), m.group(2) or ""
+            if PASSWORD_INPUT_RE.search(inner):
+                collected.add(urljoin(base_url, action))
+
+        for path in WELL_KNOWN:
+            collected.add(urljoin(base_url, path))
+
+        confirmed: Set[str] = set()
+        for url in sorted(collected):
+            try:
+                resp = await self.http.get(url)
+            except Exception:
+                continue
+            ctype = resp.headers.get("content-type", "")
+            body_bytes = resp.content if (resp.status_code < 400 and ctype.lower().startswith("text/")) else b""
+            self.db.save_page(target_id, url, resp.status_code, ctype, body_bytes)
+            if resp.status_code in (200, 302, 401, 403):
+                confirmed.add(url)
+
+        for u in sorted(confirmed):
+            lt = u.lower()
+            if any(x in lt for x in ("openid-configuration", "oauth-authorization-server", "/oauth", "/sso", "/auth/")):
+                self.db.add_finding(target_id, "auth_oauth_endpoint", u, evidence="auth-discovery", score=0.7)
+            elif any(x in lt for x in ("reset", "forgot")):
+                self.db.add_finding(target_id, "auth_password_reset", u, evidence="auth-discovery", score=0.5)
+            elif any(x in lt for x in ("register", "signup")):
+                self.db.add_finding(target_id, "auth_registration", u, evidence="auth-discovery", score=0.45)
+            else:
+                self.db.add_finding(target_id, "auth_login", u, evidence="auth-discovery", score=0.6)
+
+        log.info("%s -> %d auth endpoints", self.name, len(confirmed))
+        return sorted(confirmed)
+
