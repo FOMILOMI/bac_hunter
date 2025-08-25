@@ -1,4 +1,9 @@
-from .config import Settings
-from .cli import app
+"""Top-level package shim.
 
-__all__ = ["Settings", "app"]
+Avoid importing heavy CLI modules during test collection.
+Expose light utilities only.
+"""
+
+from .config import Settings  # noqa: F401
+
+__all__ = ["Settings"]

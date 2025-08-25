@@ -1,0 +1,20 @@
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Runtime databases and temp artifacts
+bac_hunter.db
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+
+# Editors/OS
+.DS_Store
+*.swp
+*.swo
+*.log

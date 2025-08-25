@@ -33,8 +33,10 @@ class Settings:
     max_concurrency: int = int(_env("BH_MAX_CONCURRENCY", "6"))
     max_rps: float = float(_env("BH_MAX_RPS", "3.0"))  # global cap (req/sec)
     per_host_rps: float = float(_env("BH_PER_HOST_RPS", "1.5"))
+    per_path_rps: float = float(_env("BH_PER_PATH_RPS", "1.0"))
     timeout_seconds: float = float(_env("BH_TIMEOUT", "15"))
     retry_times: int = int(_env("BH_RETRY_TIMES", "2"))
+    identity_max_concurrency: int = int(_env("BH_ID_MAX_CONC", "2"))
     proxy: Optional[str] = _env("BH_PROXY") or None  # e.g. http://127.0.0.1:8080 for Burp
     random_jitter_ms: int = int(_env("BH_JITTER_MS", "250"))
 
@@ -83,3 +85,8 @@ class Settings:
     slack_webhook: Optional[str] = _env("BH_SLACK_WEBHOOK") or None
     discord_webhook: Optional[str] = _env("BH_DISCORD_WEBHOOK") or None
     notify_min_severity: float = float(_env("BH_NOTIFY_MIN", "0.75"))
+
+    # Debugging / control
+    debug_trace: bool = _env("BH_DEBUG_TRACE", "false").lower() == "true"
+    dry_run: bool = _env("BH_DRY_RUN", "false").lower() == "true"
+    correlation_id: Optional[str] = _env("BH_CORR_ID") or None

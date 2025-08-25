@@ -1,7 +1,8 @@
 import asyncio
 import time
 from collections import defaultdict
-from typing import Dict
+from typing import Dict, Tuple
+from urllib.parse import urlparse
 
 
 class TokenBucket:
@@ -32,17 +33,20 @@ class RateLimiter:
     def __init__(self, global_rps: float, per_host_rps: float):
         self.global_bucket = TokenBucket(global_rps, burst=global_rps)
         self.host_buckets: Dict[str, TokenBucket] = defaultdict(lambda: TokenBucket(per_host_rps, burst=per_host_rps))
+        self.path_buckets: Dict[Tuple[str, str], TokenBucket] = defaultdict(lambda: TokenBucket(per_host_rps, burst=per_host_rps))
 
-    async def acquire(self, host: str):
-        await asyncio.gather(
-            self.global_bucket.take(1.0),
-            self.host_buckets[host].take(1.0),
-        )
+    async def acquire(self, host: str, path: str | None = None):
+        tasks = [self.global_bucket.take(1.0), self.host_buckets[host].take(1.0)]
+        if path:
+            tasks.append(self.path_buckets[(host, path)].take(1.0))
+        await asyncio.gather(*tasks)
 
     def set_rates(self, global_rps: float, per_host_rps: float):
         """Dynamically adjust token bucket rates."""
         self.global_bucket.rate = max(0.1, global_rps)
         for bucket in self.host_buckets.values():
+            bucket.rate = max(0.1, per_host_rps)
+        for bucket in self.path_buckets.values():
             bucket.rate = max(0.1, per_host_rps)
 
 

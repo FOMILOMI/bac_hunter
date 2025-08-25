@@ -49,6 +49,23 @@ import uvicorn
 app = typer.Typer(add_completion=False, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
 
 
+@app.callback()
+def _global_flags(
+    ctx: typer.Context,
+    debug_trace: bool = typer.Option(False, help="Enable verbose decision trace logging"),
+    dry_run: bool = typer.Option(False, help="Do not send network traffic; simulate requests"),
+    correlation_id: str = typer.Option("", help="Correlation ID for this run"),
+):
+    """Global options applied to all subcommands."""
+    # Initialize settings baseline in context for reuse by commands
+    st = Settings()
+    st.debug_trace = debug_trace or st.debug_trace
+    st.dry_run = dry_run or st.dry_run
+    st.correlation_id = correlation_id or st.correlation_id
+    ctx.obj = st
+    setup_logging(verbosity=1, debug_trace=st.debug_trace)
+
+
 @app.command()
 def recon(
     target: List[str] = typer.Argument(..., help="Target base URLs, e.g. https://example.com"),
@@ -60,6 +77,7 @@ def recon(
 ):
     """Run respectful recon (robots/sitemap/js endpoints) and store results in SQLite."""
 
+    base_settings = typer.cast(Settings, typer.get_app_dir) if False else None  # placeholder to keep importers happy
     settings = Settings()
     settings.targets = target
     settings.proxy = proxy or settings.proxy
@@ -67,7 +85,7 @@ def recon(
     settings.per_host_rps = per_host_rps
     settings.obey_robots = obey_robots
 
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     db = Storage(settings.db_path)
@@ -111,7 +129,7 @@ def smart_auto(
     verbose: int = typer.Option(1, "-v"),
 ):
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     sm = SessionManager()
     if identities_yaml:
@@ -213,7 +231,7 @@ def quickscan(
     settings = Settings()
     settings.targets = target
     settings.max_rps = max_rps
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     sm = SessionManager()
     if identities_yaml:
@@ -274,7 +292,7 @@ def scan(
     settings = Settings()
     settings.targets = target
     settings.max_rps = max_rps
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     sm = SessionManager()
     if identities_yaml:
@@ -323,7 +341,7 @@ def scan_full(
 ):
     """Complete pipeline with chosen mode and safety controls."""
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     sm = SessionManager()
     # Parse targets (allow comma-separated inside a single arg)
@@ -539,7 +557,7 @@ def scan_quick(
     verbose: int = typer.Option(1, "-v"),
 ):
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     # Use mode just for RPS tuning
     profile = get_mode_profile(mode)
@@ -581,7 +599,7 @@ def scan_custom(
     verbose: int = typer.Option(1, "-v"),
 ):
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     profile = get_mode_profile(mode)
     settings.max_rps = profile.global_rps
@@ -621,7 +639,7 @@ def setup(
     verbose: int = typer.Option(0, "-v"),
 ):
     import os, yaml
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     typer.echo("This wizard will help you create identities.yaml and tasks.yaml")
     # Identities
     identities = []
@@ -673,7 +691,7 @@ def analyze(
     from .advanced.auth_analyzer import AuthAnalyzer
 
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
 
     va = VulnerabilityAnalyzer(db)
@@ -731,7 +749,7 @@ def orchestrate(
     import yaml
     
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     
     # Load and parse tasks YAML
     try:
@@ -785,7 +803,7 @@ def orchestrator_status(
 ):
     """Show job queue status and running jobs."""
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     
     job_store = JobStore(settings.db_path)
     status = job_store.get_status()
@@ -810,7 +828,7 @@ def orchestrator_pause(
 ):
     """Pause all pending and running jobs."""
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     
     job_store = JobStore(settings.db_path)
     paused_count = job_store.pause_all_jobs()
@@ -824,7 +842,7 @@ def orchestrator_resume(
 ):
     """Resume all paused jobs (set back to pending)."""
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     
     job_store = JobStore(settings.db_path)
     resumed_count = job_store.resume_all_jobs()
@@ -849,7 +867,7 @@ def audit(
     settings.max_rps = max_rps
     settings.per_host_rps = per_host_rps
 
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     sm = SessionManager()
     if identities_yaml:
@@ -886,7 +904,7 @@ def report(
 ):
     """Export findings to HTML or CSV or JSON."""
     settings = Settings()
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     ex = Exporter(db)
     if output.lower().endswith(".csv"):
@@ -919,7 +937,7 @@ def access(
     settings.max_rps = max_rps
     settings.per_host_rps = per_host_rps
 
-    setup_logging(verbose)
+    setup_logging(verbose, debug_trace=settings.debug_trace)
     db = Storage(settings.db_path)
     sm = SessionManager()
     if identities_yaml:

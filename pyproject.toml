@@ -1,0 +1,37 @@
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = [
+  "E", "F", "I", "UP", "B", "SIM", "N"
+]
+ignore = [
+]
+exclude = ["bac_hunter.egg-info", "webapp/static", "webapp/templates"]
+
+[tool.ruff.isort]
+known-first-party = ["bac_hunter"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+exclude = ["bac_hunter.egg-info", "webapp/static", "webapp/templates"]
+
+[tool.pytest.ini_options]
+addopts = "-q --maxfail=1 --disable-warnings --cov=bac_hunter --cov-report=term-missing --cov-report=xml"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["."]
+omit = [
+  "bac_hunter.egg-info/*",
+  "webapp/*",
+  "tests/*"
+]
+
+[tool.coverage.report]
+skip_covered = true
+show_missing = true
