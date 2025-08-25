@@ -45,9 +45,25 @@ except Exception:  # fallback when executed as a top-level module
     from profiling import TargetProfiler
     from webapp import app as dashboard_app
 try:
-    from .intelligence import AutonomousAuthEngine, CredentialInferenceEngine
+    from .intelligence import (
+        AutonomousAuthEngine,
+        CredentialInferenceEngine,
+        SmartAuthDetector,
+        IntelligentIdentityFactory,
+        SmartSessionManager as SmartSessMgr,
+        IntelligentTargetProfiler,
+        InteractiveGuidanceSystem,
+    )
 except Exception:
-    from intelligence import AutonomousAuthEngine, CredentialInferenceEngine
+    from intelligence import (
+        AutonomousAuthEngine,
+        CredentialInferenceEngine,
+        SmartAuthDetector,
+        IntelligentIdentityFactory,
+        SmartSessionManager as SmartSessMgr,
+        IntelligentTargetProfiler,
+        InteractiveGuidanceSystem,
+    )
 import uvicorn
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
@@ -222,6 +238,177 @@ def smart_auto(
             await http.close()
 
     asyncio.run(run_all())
+
+
+@app.command(help="One URL, Complete Analysis: zero-config smart scan")
+def smart_scan(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    mode: str = typer.Option("standard", help="stealth|standard|aggressive|maximum"),
+    basic: bool = typer.Option(False, help="Basic scan (alias: bac-hunter scan <url>)"),
+    type: str = typer.Option("generic", "--type", help="Business type hint (ecommerce, saas, finance, etc)"),
+    verbose: int = typer.Option(1, "-v"),
+    generate_report: bool = typer.Option(False, help="Write report.html at end"),
+):
+    """Business-aware, zero-config scan using intelligent discovery and identity automation."""
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+
+    profile = get_mode_profile(mode)
+    settings.max_rps = profile.global_rps
+    settings.per_host_rps = profile.per_host_rps
+    # Parse targets
+    settings.targets = []
+    for t in target:
+        settings.targets.extend([x.strip() for x in t.split(",") if x.strip()])
+
+    async def run_all():
+        http = HttpClient(settings)
+        guide = InteractiveGuidanceSystem(http.stats, db)
+        profiler = IntelligentTargetProfiler(settings, http)
+        idfactory = IntelligentIdentityFactory(settings, http, db)
+        smartsess = SmartSessMgr(settings, http)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                evt = guide.emit("start", f"Profiling {base}")
+                typer.echo(f"[{evt.phase}] {evt.message}")
+                prof = await profiler.profile(base)
+                typer.echo(f"[profile] kind={prof.kind} framework={prof.framework or 'n/a'} auth={prof.auth_hint or 'n/a'} type={type}")
+
+                # Recon quick pass including auth discovery
+                for p in (
+                    RobotsRecon(settings, http, db),
+                    SitemapRecon(settings, http, db),
+                    JSEndpointsRecon(settings, http, db),
+                    SmartEndpointDetector(settings, http, db),
+                    AuthDiscoveryRecon(settings, http, db),
+                ):
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
+
+                # Advanced auth intel
+                sad = SmartAuthDetector(settings, http, db)
+                intel = await sad.analyze(base)
+                for u in intel.login_urls:
+                    db.add_finding(tid, "auth_login", u, evidence="smart-scan", score=0.6)
+                for u in intel.oauth_urls:
+                    db.add_finding(tid, "auth_oauth_endpoint", u, evidence="smart-scan", score=0.7)
+                for u in intel.admin_hints:
+                    db.add_finding(tid, "admin_hint", u, evidence="smart-scan", score=0.35)
+
+                # Zero-config identity: try to register and login (best effort)
+                acct = await idfactory.generate(base)
+                logged = await idfactory.login(base, acct)
+                smartsess.register(logged)
+
+                # Access differential using anon vs generated
+                unauth = Identity(name="anon")
+                diff = DifferentialTester(settings, http, db)
+                idor = IDORProbe(settings, http, db)
+                fb = ForceBrowser(settings, http, db)
+                urls = list(dict.fromkeys(db.iter_target_urls(tid)))[: (20 if basic else 60)]
+                for u in urls:
+                    try:
+                        await diff.compare_identities(u, unauth, logged)
+                        await idor.test(base, u, unauth, logged)
+                    except Exception:
+                        continue
+                if not basic:
+                    await fb.try_paths(urls[:30], unauth, logged)
+        finally:
+            await http.close()
+
+    asyncio.run(run_all())
+    if generate_report:
+        path = Exporter(db).to_html("report.html")
+        typer.echo(f"[ok] wrote {path}")
+
+
+@app.command(help="Low-profile scan: stealth mode + minimal probes")
+def stealth_scan(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    profile = get_mode_profile("stealth")
+    settings.max_rps = profile.global_rps
+    settings.per_host_rps = profile.per_host_rps
+    settings.targets = []
+    for t in target:
+        settings.targets.extend([x.strip() for x in t.split(",") if x.strip()])
+
+    async def run_all():
+        http = HttpClient(settings)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                # Minimal recon only
+                for p in (
+                    RobotsRecon(settings, http, db),
+                    SitemapRecon(settings, http, db),
+                    SmartEndpointDetector(settings, http, db),
+                ):
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
+        finally:
+            await http.close()
+
+    asyncio.run(run_all())
+
+
+@app.command(help="Complete audit: one-click with optional report generation")
+def full_audit(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    generate_report: bool = typer.Option(False, "--generate-report", help="Emit report.html at end"),
+    mode: str = typer.Option("standard", "--mode"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    profile = get_mode_profile(mode)
+    settings.max_rps = profile.global_rps
+    settings.per_host_rps = profile.per_host_rps
+    settings.targets = []
+    for t in target:
+        settings.targets.extend([x.strip() for x in t.split(",") if x.strip()])
+
+    async def run_all():
+        http = HttpClient(settings)
+        profiler = TargetProfiler(settings, http)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                _ = await profiler.profile(base, Identity(name="anon"))
+                # reuse existing consolidated pipeline
+                for p in (
+                    RobotsRecon(settings, http, db),
+                    SitemapRecon(settings, http, db),
+                    JSEndpointsRecon(settings, http, db),
+                    SmartEndpointDetector(settings, http, db),
+                    AuthDiscoveryRecon(settings, http, db),
+                ):
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
+                # quick header audit
+                headers = HeaderInspector(settings, http, db)
+                urls = list(dict.fromkeys(db.iter_target_urls(tid)))[:80]
+                await headers.run(urls, Identity(name="anon"))
+        finally:
+            await http.close()
+    asyncio.run(run_all())
+    if generate_report:
+        path = Exporter(db).to_html("report.html")
+        typer.echo(f"[ok] wrote {path}")
 
 @app.command(help="Run a fast automatic BAC/IDOR quick scan. Minimal setup; YAML optional.")
 def quickscan(
