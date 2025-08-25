@@ -54,6 +54,7 @@ app = typer.Typer(add_completion=False, help="BAC-HUNTER v2.0 - Comprehensive BA
 
 @app.callback(invoke_without_command=True)
 def _version_callback(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None,
         "--version",
@@ -64,9 +65,13 @@ def _version_callback(
     if version:
         typer.echo(f"bac-hunter {_BH_VERSION}")
         raise typer.Exit()
-    # If invoked without command and no version flag, show help
-    # to match common CLI behavior
-    raise typer.Exit(code=0)
+    # Only show help and exit when no subcommand is provided
+    if ctx.invoked_subcommand is None:
+        try:
+            typer.echo(app.get_help(ctx))
+        except Exception:
+            pass
+        raise typer.Exit(code=0)
 
 
 @app.command()
@@ -695,6 +700,10 @@ def setup(
     with open(os.path.join(out_dir, "tasks.yaml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(tasks, f, sort_keys=False)
     typer.echo(f"[ok] wrote {os.path.join(out_dir, 'tasks.yaml')}")
+
+
+if __name__ == "__main__":
+    app()
 
 
 @app.command(help="Analyze findings: risk scoring and optional auth mapping")
