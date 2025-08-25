@@ -1,0 +1,20 @@
+tasks:
+  - type: recon
+    priority: 0
+    params:
+      target: https://example.com
+      robots: true
+      sitemap: true
+      js: true
+  - type: access
+    priority: 1
+    params:
+      target: https://example.com
+      identity_yaml: identities.yaml
+      unauth: anon
+      auth: user
+  - type: audit
+    priority: 1
+    params:
+      target: https://example.com
+      auth: user
