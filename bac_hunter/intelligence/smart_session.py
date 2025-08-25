@@ -36,7 +36,12 @@ class SmartSessionManager:
 		return [s.identity for s in self._sessions.values()]
 
 	async def refresh_if_needed(self, name: str) -> Identity:
-		st = self._sessions[name]
+		# Gracefully handle unknown names by creating a lightweight identity
+		st = self._sessions.get(name)
+		if st is None:
+			anon = Identity(name=name or "anon")
+			self._sessions[name] = SessionState(identity=anon, active=True, last_token=anon.auth_bearer)
+			st = self._sessions[name]
 		# Placeholder: attempt refresh if bearer exists and a refresh endpoint is common.
 		if st.identity.auth_bearer and st.active:
 			for path in ("/auth/refresh", "/api/token/refresh", "/session/refresh"):
@@ -60,4 +65,3 @@ class SmartSessionManager:
 	def _guess_base(self, identity: Identity) -> str:
 		# Without binding to a specific target, fallback to placeholder; callers should use absolute URLs.
 		return ""
-

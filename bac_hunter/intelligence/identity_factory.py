@@ -61,8 +61,12 @@ class IntelligentIdentityFactory:
 
 	async def generate(self, base_url: str, role: str = "user") -> GeneratedAccount:
 		from urllib.parse import urljoin
-		inbox = await self.mail.create_inbox()
-		email = inbox["address"]
+		# Create disposable inbox if available; otherwise fall back to a safe dummy
+		try:
+			inbox = await self.mail.create_inbox()
+			email = inbox.get("address") or f"tester{random.randint(1000, 999999)}@example.test"
+		except Exception:
+			email = f"tester{random.randint(1000, 999999)}@example.test"
 		password = f"Bh!{random.randint(100000, 999999)}aA"
 		name = f"auto-{role}-{random.randint(10,9999)}"
 		identity = Identity(name=name)
