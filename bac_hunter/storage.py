@@ -88,6 +88,28 @@ class Storage:
                 (target_id, url, status, content_type or "", body or b""),
             )
 
+    def get_page(self, target_id: int, url: str) -> Optional[tuple[int, str, bytes]]:
+        """Return (status, content_type, body) for a cached page if present."""
+        with self.conn() as c:
+            cur = c.execute(
+                "SELECT status, content_type, body FROM pages WHERE target_id=? AND url=?",
+                (target_id, url),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            status, content_type, body = row
+            return int(status), (content_type or ""), (body or b"")
+
+    def get_page_status(self, target_id: int, url: str) -> Optional[int]:
+        with self.conn() as c:
+            cur = c.execute(
+                "SELECT status FROM pages WHERE target_id=? AND url=?",
+                (target_id, url),
+            )
+            row = cur.fetchone()
+            return int(row[0]) if row else None
+
     def add_finding(self, target_id: int, type_: str, url: str, evidence: str, score: float = 0.0):
         with self.conn() as c:
             c.execute(

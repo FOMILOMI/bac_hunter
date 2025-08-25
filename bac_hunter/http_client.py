@@ -8,14 +8,14 @@ import time
 try:
     from .config import Settings
     from .rate_limiter import RateLimiter, AdaptiveRateLimiter
-    from .utils import host_of, jitter, pick_ua
+    from .utils import host_of, jitter, pick_ua, normalize_url, dedup_key_for_url, path_for_log
     from .monitoring.stats_collector import StatsCollector
     from .safety.throttle_calibrator import ThrottleCalibrator
     from .safety.waf_detector import WAFDetector
 except Exception:  # fallback when imported as top-level module
     from config import Settings
     from rate_limiter import RateLimiter, AdaptiveRateLimiter
-    from utils import host_of, jitter, pick_ua
+    from utils import host_of, jitter, pick_ua, normalize_url, dedup_key_for_url, path_for_log
     from monitoring.stats_collector import StatsCollector
     from safety.throttle_calibrator import ThrottleCalibrator
     from safety.waf_detector import WAFDetector
@@ -39,8 +39,10 @@ class HttpClient:
         if isinstance(self._rl, AdaptiveRateLimiter):
             self._rl.calibrator = self._cal
         self._waf = WAFDetector() if self.s.enable_waf_detection else None
-        # simple in-memory GET cache
+        # simple in-memory GET cache for <400 responses (legacy)
         self._cache: Dict[str, tuple[float, httpx.Response]] = {}
+        # smart dedup cache (normalized host+path -> last response)
+        self._dedup_cache: Dict[str, httpx.Response] = {}
 
     async def close(self):
         await self._client.aclose()
@@ -105,10 +107,32 @@ class HttpClient:
             self._cal.record_response(status_code, elapsed_ms / 1000.0)
 
     async def _request(self, method: str, url: str, *, headers: Optional[dict] = None, data: Any = None, json: Any = None) -> httpx.Response:
+        # Normalize URL path to reduce duplicates
+        try:
+            url = normalize_url(url)
+        except Exception:
+            pass
         host = host_of(url)
         async with self._sem:
             # GET cache check
             if method.upper() == "GET":
+                # Smart dedup: reuse any prior result for same host+path (all status codes)
+                if getattr(self.s, "smart_dedup_enabled", False):
+                    try:
+                        key = dedup_key_for_url(url)
+                        cached_resp = self._dedup_cache.get(key)
+                        if cached_resp is not None:
+                            try:
+                                msg_tag = "[SKIP]" if cached_resp.status_code >= 400 else "[CACHE]"
+                                if msg_tag == "[SKIP]":
+                                    log.info("%s Already tested %s (%s)", msg_tag, path_for_log(url), cached_resp.status_code)
+                                else:
+                                    log.info("%s Reusing result for %s (%s)", msg_tag, path_for_log(url), cached_resp.status_code)
+                            except Exception:
+                                pass
+                            return cached_resp
+                    except Exception:
+                        pass
                 cached = self._cache_get(url)
                 if cached is not None:
                     return cached
@@ -130,8 +154,27 @@ class HttpClient:
                             self._waf.analyze_response(url, r.status_code, dict(r.headers), body_sample)
                         except Exception:
                             pass
-                    if method.upper() == "GET" and r.status_code < 400:
-                        self._cache_put(url, r)
+                    if method.upper() == "GET":
+                        # Populate legacy cache for 2xx/3xx and dedup cache for all
+                        if r.status_code < 400:
+                            self._cache_put(url, r)
+                        if getattr(self.s, "smart_dedup_enabled", False):
+                            try:
+                                key = dedup_key_for_url(url)
+                                # Only cache first-seen result
+                                if key not in self._dedup_cache:
+                                    self._dedup_cache[key] = r
+                            except Exception:
+                                pass
+                        # 429 backoff (rate limiting awareness)
+                        if getattr(self.s, "smart_backoff_enabled", False) and r.status_code == 429:
+                            try:
+                                import random as _rnd, asyncio as _aio
+                                delay = _rnd.uniform(10.0, 30.0)
+                                log.warning("[!] 429 Too Many Requests on %s – backing off for %.1fs", path_for_log(url), delay)
+                                await _aio.sleep(delay)
+                            except Exception:
+                                pass
                     return r
                 except Exception as e:
                     elapsed_ms = (time.perf_counter() - start) * 1000.0

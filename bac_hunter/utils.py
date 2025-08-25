@@ -34,8 +34,8 @@ async def jitter(ms: int):
 
 # --- Smart path helpers for deduplication and normalization ---
 def normalize_path(path: str) -> str:
-	"""Normalize a URL path: ensure leading slash, collapse duplicate slashes,
-	remove trailing slash except for root."""
+	"""Normalize a URL path for requesting: ensure leading slash, collapse duplicate slashes,
+	remove trailing slash except for root. Case is preserved."""
 	if not path:
 		return "/"
 	# ensure leading slash
@@ -51,10 +51,29 @@ def normalize_path(path: str) -> str:
 
 
 def normalize_url(url: str) -> str:
-	"""Normalize a full URL by normalizing the path component only."""
+	"""Normalize a full URL by normalizing the path component only (preserve case)."""
 	parsed = urlparse(url)
 	new_path = normalize_path(parsed.path)
 	return urlunparse(parsed._replace(path=new_path))
+
+
+def _dedup_canonical_path(path: str) -> str:
+	"""Canonicalize path for deduplication: normalized and lowercased."""
+	return normalize_path(path).lower()
+
+
+def dedup_key_for_url(url: str) -> str:
+	"""Build a deduplication key from URL host + canonical path (ignoring query/fragment)."""
+	parsed = urlparse(url)
+	host = (parsed.netloc or '').lower()
+	path = _dedup_canonical_path(parsed.path)
+	return host + path
+
+
+def path_for_log(url: str) -> str:
+	"""Return the normalized path of a URL for concise logging (preserves original case)."""
+	parsed = urlparse(url)
+	return normalize_path(parsed.path)
 
 
 def is_recursive_duplicate_path(path: str) -> bool:

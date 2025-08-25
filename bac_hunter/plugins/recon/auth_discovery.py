@@ -79,7 +79,18 @@ class AuthDiscoveryRecon(Plugin):
         confirmed: Set[str] = set()
         for url in sorted(collected):
             try:
-                resp = await self.http.get(url)
+                # If we already fetched this URL in this target context, reuse the cached status
+                cached_status = self.db.get_page_status(target_id, url) if getattr(self.settings, 'smart_dedup_enabled', False) else None
+                if cached_status is not None:
+                    class _Fake:
+                        def __init__(self, sc: int):
+                            self.status_code = sc
+                            self.headers = {}
+                            self.content = b""
+                    resp = _Fake(cached_status)  
+                    log.info("[CACHE] Reusing result for %s (%s)", url, cached_status)
+                else:
+                    resp = await self.http.get(url)
             except Exception:
                 continue
             ctype = resp.headers.get("content-type", "")
