@@ -53,8 +53,8 @@ class SmartEndpointDetector(Plugin):
                         from utils import normalize_url, is_recursive_duplicate_path
                     u_n = normalize_url(u)
                     if is_recursive_duplicate_path(u_n.split('://',1)[-1].split('/',1)[-1] if '://' in u_n else u_n):
-                        if getattr(self.s, 'smart_dedup_enabled', False):
-                            log.info("[!] Skipping duplicate endpoint: %s", u_n)
+                        if getattr(self.settings, 'smart_dedup_enabled', False):
+                            log.info("[SKIP] Duplicate endpoint %s", u_n)
                         continue
                     collected.add(u_n)
         except Exception as e:
@@ -69,8 +69,8 @@ class SmartEndpointDetector(Plugin):
                 from utils import normalize_url, is_recursive_duplicate_path
             url_n = normalize_url(url)
             if is_recursive_duplicate_path(url_n.split('://',1)[-1].split('/',1)[-1] if '://' in url_n else url_n):
-                if getattr(self.s, 'smart_dedup_enabled', False):
-                    log.info("[!] Skipping duplicate endpoint: %s", url_n)
+                if getattr(self.settings, 'smart_dedup_enabled', False):
+                    log.info("[SKIP] Duplicate endpoint %s", url_n)
                 continue
             if url_n in collected:
                 continue
@@ -82,7 +82,7 @@ class SmartEndpointDetector(Plugin):
                 self.db.save_page(target_id, url_n, resp.status_code, content_type, body_bytes)
                 if resp.status_code in (200, 401, 403):
                     collected.add(url_n)
-                if getattr(self.s, 'smart_backoff_enabled', False) and resp.status_code == 429:
+                if getattr(self.settings, 'smart_backoff_enabled', False) and resp.status_code == 429:
                     log.warning("[!] Rate limited (429) on %s, backing off", url_n)
                     import asyncio as _aio
                     await _aio.sleep(2.0)

@@ -44,10 +44,28 @@ class JSEndpointsRecon(Plugin):
                         collected |= self._extract_paths(jr.text, base_url)
                 except Exception:
                     continue
-        for url in sorted(collected):
-            self.db.add_finding(target_id, "endpoint", url, evidence="js-scan", score=0.3)
-        log.info("%s -> %d endpoints", self.name, len(collected))
-        return sorted(collected)
+        # Normalize, dedup, skip recursive nonsense
+        try:
+            from ...utils import normalize_url, is_recursive_duplicate_path
+        except Exception:
+            from utils import normalize_url, is_recursive_duplicate_path
+        final = []
+        seen = set()
+        for u in sorted(collected):
+            un = normalize_url(u)
+            if is_recursive_duplicate_path(un.split('://',1)[-1].split('/',1)[-1] if '://' in un else un):
+                if getattr(self.settings, 'smart_dedup_enabled', False):
+                    log.info("[SKIP] Duplicate endpoint %s", un)
+                continue
+            if un in seen:
+                if getattr(self.settings, 'smart_dedup_enabled', False):
+                    log.info("[SKIP] Duplicate endpoint %s", un)
+                continue
+            seen.add(un)
+            final.append(un)
+            self.db.add_finding(target_id, "endpoint", un, evidence="js-scan", score=0.3)
+        log.info("%s -> %d endpoints", self.name, len(final))
+        return final
 
     def _extract_paths(self, text: str, base_url: str) -> Set[str]:
         out: Set[str] = set()
