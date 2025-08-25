@@ -1,8 +1,12 @@
 from __future__ import annotations
 import asyncio
 import logging
-from typing import List
+from typing import List, Optional
 import typer
+try:
+    from . import __version__ as _BH_VERSION
+except Exception:
+    _BH_VERSION = "2.0.0"
 
 try:
     from .config import Settings, Identity
@@ -48,12 +52,28 @@ import uvicorn
 
 app = typer.Typer(add_completion=False, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
 
+@app.callback(invoke_without_command=True)
+def _version_callback(
+    version: bool = typer.Option(
+        None,
+        "--version",
+        help="Show version and exit",
+        is_eager=True,
+    )
+):
+    if version:
+        typer.echo(f"bac-hunter {_BH_VERSION}")
+        raise typer.Exit()
+    # If invoked without command and no version flag, show help
+    # to match common CLI behavior
+    raise typer.Exit(code=0)
+
 
 @app.command()
 def recon(
     target: List[str] = typer.Argument(..., help="Target base URLs, e.g. https://example.com"),
     verbose: int = typer.Option(1, "-v", help="Verbosity: 0=warn,1=info,2=debug"),
-    proxy: str | None = typer.Option(None, help="Upstream HTTP proxy (e.g. http://127.0.0.1:8080)"),
+    proxy: "Optional[str]" = typer.Option(None, help="Upstream HTTP proxy (e.g. http://127.0.0.1:8080)"),
     obey_robots: bool = typer.Option(True, help="Respect robots.txt when crawling clickable paths"),
     max_rps: float = typer.Option(3.0, help="Global requests per second cap"),
     per_host_rps: float = typer.Option(1.5, help="Per-host requests per second cap"),
@@ -620,10 +640,27 @@ def setup(
     out_dir: str = typer.Option(".", help="Directory to write YAML files"),
     verbose: int = typer.Option(0, "-v"),
 ):
-    import os, yaml
+    import os, sys, yaml
     setup_logging(verbose)
+    # Non-interactive fallback: if no TTY, generate defaults without prompts
+    if not sys.stdin.isatty():
+        os.makedirs(out_dir, exist_ok=True)
+        identities_yaml = {"identities": [{"name": "anon", "headers": {"User-Agent": "Mozilla/5.0"}}]}
+        with open(os.path.join(out_dir, "identities.yaml"), "w", encoding="utf-8") as f:
+            yaml.safe_dump(identities_yaml, f, sort_keys=False)
+        tasks = {
+            "tasks": [
+                {"type": "recon", "params": {"target": "https://example.com", "robots": True, "sitemap": True, "js": True}, "priority": 0},
+                {"type": "access", "params": {"target": "https://example.com", "identity_yaml": "identities.yaml", "unauth": "anon", "auth": ""}, "priority": 1},
+                {"type": "audit", "params": {"target": "https://example.com", "auth": ""}, "priority": 1},
+            ]
+        }
+        with open(os.path.join(out_dir, "tasks.yaml"), "w", encoding="utf-8") as f:
+            yaml.safe_dump(tasks, f, sort_keys=False)
+        typer.echo(f"[ok] wrote {os.path.join(out_dir, 'identities.yaml')} and {os.path.join(out_dir, 'tasks.yaml')}")
+        return
     typer.echo("This wizard will help you create identities.yaml and tasks.yaml")
-    # Identities
+    # Interactive mode
     identities = []
     if typer.confirm("Do you want to add an authenticated identity?", default=False):
         name = typer.prompt("Identity name", default="user")
