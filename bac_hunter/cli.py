@@ -50,23 +50,25 @@ except Exception:
     from intelligence import AutonomousAuthEngine, CredentialInferenceEngine
 import uvicorn
 
-app = typer.Typer(add_completion=False, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
+app = typer.Typer(add_completion=False, no_args_is_help=True, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
 
-@app.callback(invoke_without_command=True)
+@app.callback()
 def _version_callback(
+    ctx: typer.Context,
     version: bool = typer.Option(
         None,
         "--version",
         help="Show version and exit",
         is_eager=True,
-    )
+    ),
 ):
+    # Handle global --version early and exit
     if version:
         typer.echo(f"bac-hunter {_BH_VERSION}")
         raise typer.Exit()
-    # If invoked without command and no version flag, show help
-    # to match common CLI behavior
-    raise typer.Exit(code=0)
+    # Do not exit here; allow subcommands to execute normally.
+    # no_args_is_help=True on the app will display help when no command is provided.
+    return
 
 
 @app.command()
