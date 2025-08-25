@@ -83,3 +83,7 @@ class Settings:
     slack_webhook: Optional[str] = _env("BH_SLACK_WEBHOOK") or None
     discord_webhook: Optional[str] = _env("BH_DISCORD_WEBHOOK") or None
     notify_min_severity: float = float(_env("BH_NOTIFY_MIN", "0.75"))
+
+    # Smart discovery controls (default off to preserve backward compatibility)
+    smart_dedup_enabled: bool = _env("BH_SMART_DEDUP", "false").lower() == "true"
+    smart_backoff_enabled: bool = _env("BH_SMART_BACKOFF", "false").lower() == "true"
