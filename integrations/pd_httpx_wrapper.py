@@ -3,7 +3,10 @@ import json
 import logging
 from typing import List, Dict, Any
 
-from .external_tools import ExternalToolRunner
+try:
+	from .external_tools import ExternalToolRunner
+except Exception:
+	from integrations.external_tools import ExternalToolRunner
 
 log = logging.getLogger("integrations.pd_httpx")
 

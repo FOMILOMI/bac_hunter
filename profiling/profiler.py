@@ -2,8 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from ..config import Settings, Identity
-from ..http_client import HttpClient
+try:
+	from ..config import Settings, Identity
+	from ..http_client import HttpClient
+except Exception:
+	from config import Settings, Identity
+	from http_client import HttpClient
 
 
 @dataclass

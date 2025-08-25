@@ -2,7 +2,10 @@ from __future__ import annotations
 import logging
 from typing import Dict, Optional, List, Any
 
-from ..storage import Storage
+try:
+	from ..storage import Storage
+except Exception:
+	from storage import Storage
 
 
 log = logging.getLogger("advanced.response")

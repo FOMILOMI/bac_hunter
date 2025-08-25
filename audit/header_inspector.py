@@ -2,9 +2,14 @@ from __future__ import annotations
 import logging
 from typing import Dict, List, Tuple
 
-from ..config import Settings, Identity
-from ..http_client import HttpClient
-from ..storage import Storage
+try:
+	from ..config import Settings, Identity
+	from ..http_client import HttpClient
+	from ..storage import Storage
+except Exception:
+	from config import Settings, Identity
+	from http_client import HttpClient
+	from storage import Storage
 
 log = logging.getLogger("audit.headers")
 

@@ -2,10 +2,16 @@ from __future__ import annotations
 import logging
 from typing import Optional, Tuple
 
-from ..http_client import HttpClient
-from ..config import Settings, Identity
-from ..storage import Storage
-from .comparator import ResponseComparator, DiffResult
+try:
+	from ..http_client import HttpClient
+	from ..config import Settings, Identity
+	from ..storage import Storage
+	from .comparator import ResponseComparator, DiffResult
+except Exception:
+	from http_client import HttpClient
+	from config import Settings, Identity
+	from storage import Storage
+	from access.comparator import ResponseComparator, DiffResult
 
 log = logging.getLogger("access.diff")
 

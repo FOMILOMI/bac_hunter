@@ -6,8 +6,12 @@ from typing import List, Dict, Any
 from pathlib import Path
 import shutil
 
-from .external_tools import ExternalToolRunner
-from ..storage import Storage
+try:
+	from .external_tools import ExternalToolRunner
+	from ..storage import Storage
+except Exception:
+	from integrations.external_tools import ExternalToolRunner
+	from storage import Storage
 
 log = logging.getLogger("integrations.nuclei")
 

@@ -4,10 +4,16 @@ from typing import List
 from urllib.parse import urljoin
 import xml.etree.ElementTree as ET
 
-from ...storage import Storage
-from ...http_client import HttpClient
-from ...config import Settings
-from ..base import Plugin
+try:
+	from ...storage import Storage
+	from ...http_client import HttpClient
+	from ...config import Settings
+	from ..base import Plugin
+except Exception:
+	from storage import Storage
+	from http_client import HttpClient
+	from config import Settings
+	from plugins.base import Plugin
 
 log = logging.getLogger("recon.sitemap")
 

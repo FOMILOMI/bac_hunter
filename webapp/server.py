@@ -5,12 +5,20 @@ from typing import List, Dict, Any
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 
-from ..config import Settings
-from ..storage import Storage
-from ..http_client import HttpClient
-from ..monitoring.stats_collector import StatsCollector
-from ..reporting import Exporter
-from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector
+try:
+    from ..config import Settings
+    from ..storage import Storage
+    from ..http_client import HttpClient
+    from ..monitoring.stats_collector import StatsCollector
+    from ..reporting import Exporter
+    from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector
+except Exception:
+    from config import Settings
+    from storage import Storage
+    from http_client import HttpClient
+    from monitoring.stats_collector import StatsCollector
+    from reporting import Exporter
+    from plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector
 
 app = FastAPI(title="BAC Hunter Dashboard", version="1.0")
 

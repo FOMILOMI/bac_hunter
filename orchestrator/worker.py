@@ -4,19 +4,34 @@ import logging
 import traceback
 from typing import Any, Dict
 
-from .jobs import JobStore
-from ..config import Settings
-from ..http_client import HttpClient
-from ..storage import Storage
-from ..session_manager import SessionManager
-from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, GraphQLRecon
-from ..access import IDORProbe, DifferentialTester, ForceBrowser
-from ..audit import HeaderInspector, ParamToggle
-from ..exploitation.privilege_escalation import PrivilegeEscalationTester
-from ..advanced.parameter_miner import ParameterMiner
-from ..integrations import SubfinderWrapper, PDHttpxWrapper
-from ..notifications import AlertManager
-from ..safety.scope_guard import ScopeGuard
+try:
+	from .jobs import JobStore
+	from ..config import Settings
+	from ..http_client import HttpClient
+	from ..storage import Storage
+	from ..session_manager import SessionManager
+	from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, GraphQLRecon
+	from ..access import IDORProbe, DifferentialTester, ForceBrowser
+	from ..audit import HeaderInspector, ParamToggle
+	from ..exploitation.privilege_escalation import PrivilegeEscalationTester
+	from ..advanced.parameter_miner import ParameterMiner
+	from ..integrations import SubfinderWrapper, PDHttpxWrapper
+	from ..notifications import AlertManager
+	from ..safety.scope_guard import ScopeGuard
+except Exception:
+	from orchestrator.jobs import JobStore
+	from config import Settings
+	from http_client import HttpClient
+	from storage import Storage
+	from session_manager import SessionManager
+	from plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, GraphQLRecon
+	from access import IDORProbe, DifferentialTester, ForceBrowser
+	from audit import HeaderInspector, ParamToggle
+	from exploitation.privilege_escalation import PrivilegeEscalationTester
+	from advanced.parameter_miner import ParameterMiner
+	from integrations import SubfinderWrapper, PDHttpxWrapper
+	from notifications import AlertManager
+	from safety.scope_guard import ScopeGuard
 
 log = logging.getLogger('orch.worker')
 
