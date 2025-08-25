@@ -21,6 +21,30 @@ pip install -U pip
 pip install -r requirements.txt
 ```
 
+### One-Click Smart Auto
+
+Run a near‑zero configuration scan that profiles, performs smart recon, gathers auth intelligence, suggests identities, and runs light access checks:
+
+```bash
+python -m bac_hunter smart-auto https://target.com
+```
+
+Options:
+
+```bash
+python -m bac_hunter smart-auto \
+  --mode standard \
+  --max-rps 2.0 \
+  --identities-yaml identities.yaml \
+  --auth-name user https://target.com
+```
+
+What it does:
+- Profiles target kind/framework/auth hints
+- Discovers login/reset/OAuth endpoints and infers session token style
+- Suggests synthetic identities (no brute-force)
+- Runs differential/IDOR/force-browse on a small sample
+
 ### Unified Scans
 ```bash
 # Full pipeline

@@ -4,23 +4,46 @@ import logging
 from typing import List
 import typer
 
-from .config import Settings, Identity
-from .modes import get_mode_profile
-from .logging_setup import setup_logging
-from .http_client import HttpClient
-from .storage import Storage
-from .session_manager import SessionManager
-from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector, AuthDiscoveryRecon
-from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
-from .audit import HeaderInspector, ParamToggle
-from .reporting import Exporter
-from .orchestrator import JobStore, Worker
-from .integrations import SubfinderWrapper, PDHttpxWrapper
-from .exploitation.privilege_escalation import PrivilegeEscalationTester
-from .advanced.parameter_miner import ParameterMiner
-from .fallback import PathScanner, ParamScanner
-from .profiling import TargetProfiler
-from .webapp import app as dashboard_app
+try:
+    from .config import Settings, Identity
+    from .modes import get_mode_profile
+    from .logging_setup import setup_logging
+    from .http_client import HttpClient
+    from .storage import Storage
+    from .session_manager import SessionManager
+    from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector, AuthDiscoveryRecon
+    from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
+    from .audit import HeaderInspector, ParamToggle
+    from .reporting import Exporter
+    from .orchestrator import JobStore, Worker
+    from .integrations import SubfinderWrapper, PDHttpxWrapper
+    from .exploitation.privilege_escalation import PrivilegeEscalationTester
+    from .advanced.parameter_miner import ParameterMiner
+    from .fallback import PathScanner, ParamScanner
+    from .profiling import TargetProfiler
+    from .webapp import app as dashboard_app
+except Exception:  # fallback when executed as a top-level module
+    from config import Settings, Identity
+    from modes import get_mode_profile
+    from logging_setup import setup_logging
+    from http_client import HttpClient
+    from storage import Storage
+    from session_manager import SessionManager
+    from plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector, AuthDiscoveryRecon
+    from access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
+    from audit import HeaderInspector, ParamToggle
+    from reporting import Exporter
+    from orchestrator import JobStore, Worker
+    from integrations import SubfinderWrapper, PDHttpxWrapper
+    from exploitation.privilege_escalation import PrivilegeEscalationTester
+    from advanced.parameter_miner import ParameterMiner
+    from fallback import PathScanner, ParamScanner
+    from profiling import TargetProfiler
+    from webapp import app as dashboard_app
+try:
+    from .intelligence import AutonomousAuthEngine, CredentialInferenceEngine
+except Exception:
+    from intelligence import AutonomousAuthEngine, CredentialInferenceEngine
 import uvicorn
 
 app = typer.Typer(add_completion=False, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
@@ -77,6 +100,106 @@ def recon(
 
     asyncio.run(run_all())
 
+
+@app.command(help="One-click smart auto scan: profile -> recon -> auth-intel -> access (light)")
+def smart_auto(
+    target: List[str] = typer.Argument(..., help="Target base URLs or domains"),
+    identities_yaml: str = typer.Option("", help="Optional identities.yaml for authenticated checks"),
+    auth_name: str = typer.Option("", help="Authenticated identity name (if provided)"),
+    mode: str = typer.Option("standard", help="stealth|standard|aggressive|maximum (auto adjusted by WAF)"),
+    max_rps: float = typer.Option(0.0, help="Override RPS; 0 uses mode defaults"),
+    verbose: int = typer.Option(1, "-v"),
+):
+    settings = Settings()
+    setup_logging(verbose)
+    db = Storage(settings.db_path)
+    sm = SessionManager()
+    if identities_yaml:
+        try:
+            sm.load_yaml(identities_yaml)
+        except Exception as e:
+            typer.echo(f"[warn] failed to load identities yaml: {e}")
+    unauth = sm.get("anon")
+    auth = sm.get(auth_name) if auth_name else None
+
+    # Apply mode profile
+    profile = get_mode_profile(mode)
+    if max_rps and max_rps > 0:
+        settings.max_rps = max_rps
+        settings.per_host_rps = max(0.25, max_rps / 2.0)
+    else:
+        settings.max_rps = profile.global_rps
+        settings.per_host_rps = profile.per_host_rps
+
+    # Parse targets
+    targets: List[str] = []
+    for t in target:
+        parts = [x.strip() for x in t.split(",") if x.strip()]
+        targets.extend(parts)
+    settings.targets = targets
+
+    typer.echo(f"\n🧠 Smart-Auto BAC Scan | Mode: {profile.name} | RPS: {settings.max_rps:.2f}\n")
+
+    async def run_all():
+        http = HttpClient(settings)
+        profiler = TargetProfiler(settings, http)
+        try:
+            for base in settings.targets:
+                tid = db.ensure_target(base)
+                # 1) Profile
+                prof = await profiler.profile(base, unauth)
+                typer.echo(f"[profile] kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
+                # 2) Recon (robots/sitemap/js + smart + auth discovery)
+                for p in (
+                    RobotsRecon(settings, http, db),
+                    SitemapRecon(settings, http, db),
+                    JSEndpointsRecon(settings, http, db),
+                    SmartEndpointDetector(settings, http, db),
+                    AuthDiscoveryRecon(settings, http, db),
+                ):
+                    try:
+                        await p.run(base, tid)
+                    except Exception:
+                        pass
+                # 3) Auth intelligence
+                autheng = AutonomousAuthEngine(settings, http, db)
+                credeng = CredentialInferenceEngine(settings, db)
+                intel = await autheng.discover(base, unauth, auth)
+                # persist summary as findings
+                for u in intel.login_urls:
+                    db.add_finding(tid, "auth_login", u, evidence="smart-auto", score=0.6)
+                for u in intel.oauth_urls:
+                    db.add_finding(tid, "auth_oauth_endpoint", u, evidence="smart-auto", score=0.7)
+                # session hint
+                if intel.session_token_hint:
+                    db.add_finding(tid, "auth_session_hint", base, evidence=intel.session_token_hint, score=0.4)
+                # role map hints
+                for path, mp in intel.role_map.items():
+                    ev = f"unauth={mp.get('unauth',0)} auth={mp.get('auth',0)}"
+                    db.add_finding(tid, "role_boundary", base.rstrip('/')+path, evidence=ev, score=0.35)
+                # 4) Zero-config identity suggestions
+                suggested = credeng.fabricate_identities(credeng.infer_usernames(base))
+                for ident in suggested:
+                    sm.add_identity(ident)
+                # choose a secondary identity if not provided
+                secondary = auth or (suggested[0] if suggested else None)
+                # 5) Light access checks on top endpoints
+                if secondary is not None:
+                    diff = DifferentialTester(settings, http, db)
+                    idor = IDORProbe(settings, http, db)
+                    fb = ForceBrowser(settings, http, db)
+                    urls = list(dict.fromkeys(db.iter_target_urls(tid)))[:40]
+                    for u in urls:
+                        try:
+                            await diff.compare_identities(u, unauth, secondary)
+                            await idor.test(base, u, unauth, secondary)
+                        except Exception:
+                            continue
+                    await fb.try_paths(urls[:20], unauth, secondary)
+        finally:
+            await http.close()
+
+    asyncio.run(run_all())
 
 @app.command(help="Run a fast automatic BAC/IDOR quick scan. Minimal setup; YAML optional.")
 def quickscan(
