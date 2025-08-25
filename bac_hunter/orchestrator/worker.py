@@ -54,11 +54,29 @@ class Worker:
     async def run(self):
         """Main worker loop"""
         log.info(f"Worker {self.name} started")
+        idle_checks_without_jobs = 0
         while not self._stop:
             job = self.jobstore.claim_job(self.name)
             if not job:
+                # No job available right now; check if the queue is empty for a while and then exit gracefully
+                idle_checks_without_jobs += 1
+                # If the queue has been empty for ~10 seconds, exit to avoid running indefinitely
+                if idle_checks_without_jobs >= 10:
+                    try:
+                        status = self.jobstore.get_status()
+                        pending = status.get('pending', 0)
+                        running = status.get('running', 0)
+                        paused = status.get('paused', 0)
+                        if (pending + running + paused) == 0:
+                            log.info("No jobs left in queue. Worker %s exiting.", self.name)
+                            break
+                    except Exception:
+                        # If status check fails, keep waiting a bit more
+                        pass
                 await asyncio.sleep(1.0)
                 continue
+            # We have a job; reset idle counter
+            idle_checks_without_jobs = 0
             jid, spec = job
             log.info(f"Worker {self.name} processing job {jid}: {spec.get('module')} on {spec.get('target')}")
             try:

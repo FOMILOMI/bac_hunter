@@ -1,0 +1,8 @@
+identities:
+  - name: anon
+    headers:
+      User-Agent: Mozilla/5.0
+  - name: user
+    headers:
+      User-Agent: Mozilla/5.0
+    cookie: session=abcd1234; path=/

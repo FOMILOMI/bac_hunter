@@ -1,5 +1,12 @@
 Professional-grade, non-aggressive automation framework for discovering Broken Access Control vulnerabilities. Built with modular architecture, smart rate limiting, unified orchestration, and comprehensive reporting.
 
+### What’s in this release
+- Stable CLI with comprehensive subcommands (recon, scan, access, audit, exploit, smart-auto, orchestrate, dashboard, report, ci, har-replay, db-prune)
+- SQLite-backed storage auto-initialized on first run
+- Auto-fallbacks for missing external tools (Subfinder, ProjectDiscovery httpx)
+- Web dashboard (FastAPI + Uvicorn)
+- Unified exporters (HTML/CSV/JSON/SARIF, PDF via WeasyPrint if available)
+
 ## 🎯 Highlights
 
 - **Smart CLI**: `quickscan`, contextual help, runs without YAML
@@ -14,11 +21,10 @@ Professional-grade, non-aggressive automation framework for discovering Broken A
 
 ### Installation
 ```bash
-# Python 3.11+ required
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -U pip
-pip install -r requirements.txt
+# Python 3.11+ required (tested on Python 3.13)
+pip3 install --break-system-packages -r requirements.txt
+# Optional (for tests):
+pip3 install --break-system-packages pytest
 ```
 
 ### One-Click Smart Auto
@@ -48,13 +54,13 @@ What it does:
 ### Unified Scans
 ```bash
 # Full pipeline
-python -m bac_hunter.cli scan-full https://example.com --mode standard -v 1
+python -m bac_hunter scan-full https://example.com --mode standard -v 1
 
 # Quick 15-minute assessment
-python -m bac_hunter.cli scan-quick https://target.com --mode standard --timeout 15 -v 1
+python -m bac_hunter scan-quick https://target.com --mode standard --timeout 15 -v 1
 
 # Custom phase selection
-python -m bac_hunter.cli scan-custom https://example.com --phases recon,audit --mode aggressive -v 1
+python -m bac_hunter scan-custom https://example.com --phases recon,audit --mode aggressive -v 1
 ```
 – If you have identities:
 ```bash
@@ -64,8 +70,8 @@ python -m bac_hunter.cli scan-full https://target.com \
 
 ### Web Dashboard
 ```bash
-python -m bac_hunter.cli dashboard --host 0.0.0.0 --port 8000
-# Then open http://localhost:8000/docs for API, or integrate a UI frontend.
+python -m bac_hunter dashboard --host 0.0.0.0 --port 8000
+# Then open http://localhost:8000/ for the minimal UI, or /docs for API.
 ```
 - Endpoints:
   - GET `/api/stats` – runtime stats
@@ -75,38 +81,112 @@ python -m bac_hunter.cli dashboard --host 0.0.0.0 --port 8000
 
 ### Setup Wizard
 ```bash
-python -m bac_hunter.cli setup --out-dir .
-# Creates identities.yaml and tasks.yaml with guided Q&A
+python -m bac_hunter setup --out-dir .
+# Creates identities.yaml and tasks.yaml with guided Q&A (non-interactive in CI)
 ```
 
 ### Traditional Workflow
 - Recon:
 ```bash
-python -m bac_hunter.cli recon https://target.com \
+python -m bac_hunter recon https://target.com \
   --max-rps 2 --per-host-rps 1 \
   --proxy http://127.0.0.1:8080 -v 1
 ```
 - Access (diff/IDOR/force-browse):
 ```bash
-python -m bac_hunter.cli access https://target.com \
+python -m bac_hunter access https://target.com \
   --identities-yaml identities.yaml \
   --unauth-name anon --auth-name user \
   --max-rps 2 -v 1
 ```
 - Audit:
 ```bash
-python -m bac_hunter.cli audit https://target.com \
+python -m bac_hunter audit https://target.com \
   --identities-yaml identities.yaml \
   --auth-name user --max-rps 2 -v 1
 ```
 
 ### Reporting
 ```bash
-python -m bac_hunter.cli report --output report.html
-python -m bac_hunter.cli report --output findings.csv
-python -m bac_hunter.cli report --output report.pdf   # needs WeasyPrint, else falls back to HTML
-python -m bac_hunter.cli report --output report.sarif # SARIF for CI integrations
+python -m bac_hunter report --output report.html
+python -m bac_hunter report --output findings.csv
+python -m bac_hunter report --output report.pdf   # needs WeasyPrint, else falls back to HTML
+python -m bac_hunter report --output report.sarif # SARIF for CI integrations
 ```
+
+## ✅ Supported Commands
+- `recon`: robots/sitemap/js/smart recon into SQLite
+- `scan`: smart recon with optional heuristics
+- `smart-auto`: profile -> recon -> auth intel -> light access
+- `quickscan` and `scan-quick`: fast defaults for quick assessments
+- `scan-custom`, `scan-full`: phased orchestration with mode profiles
+- `access`: diff/IDOR/force-browse (non-aggressive)
+- `audit`: header/CORS and safe param toggles
+- `exploit`: safe privilege escalation and parameter mining
+- `har-replay`: compare GETs from HAR across identities
+- `report`: HTML/CSV/JSON/SARIF, PDF via WeasyPrint if present
+- `dashboard`: FastAPI app with API and minimal UI
+- `setup`: generate `identities.yaml` and `tasks.yaml`
+- `orchestrate`, `orchestrator-status/pause/resume`: job queue
+- `authorize`: PD subfinder + httpx wrapper (graceful if tools missing)
+- `ci`: YAML-driven scan with fail threshold
+- `db-prune`: prune SQLite size
+
+## 🧩 Config Files
+- `identities.yaml`
+  - Example:
+    ```yaml
+    identities:
+      - name: anon
+        headers:
+          User-Agent: Mozilla/5.0
+      - name: user
+        headers:
+          User-Agent: Mozilla/5.0
+        cookie: session=abcd1234; path=/
+    ```
+- `tasks.yaml`
+  - Example:
+    ```yaml
+    tasks:
+      - type: recon
+        priority: 0
+        params:
+          target: https://example.com
+          robots: true
+          sitemap: true
+          js: true
+      - type: access
+        priority: 1
+        params:
+          target: https://example.com
+          identity_yaml: identities.yaml
+          unauth: anon
+          auth: user
+      - type: audit
+        priority: 1
+        params:
+          target: https://example.com
+          auth: user
+    ```
+- `.bac-hunter.yml` (for `ci`):
+  ```yaml
+  targets:
+    - https://example.com
+  identities: identities.yaml
+  auth: user
+  smart: true
+  ```
+
+## 🧪 Troubleshooting
+- No output on some commands: many subcommands run silently unless findings occur; use `-v 2` for debug logs.
+- External tools missing (subfinder/httpx): integration wrappers degrade gracefully; install tools to enable richer results.
+- PDF export errors: WeasyPrint relies on system libraries; the exporter falls back to HTML automatically.
+- SQLite locked or large: use `db-prune`; rerun with lower RPS.
+
+## 🧰 Known Limitations
+- Network-dependent checks may return sparse results against `https://example.com`.
+- Orchestrator runs in-foreground; workers auto-exit when queue idle for ~10s.
 
 ## 🧠 Intelligent Target Profiling
 - Detects target kind: web / SPA / API from Content-Type and HTML patterns

@@ -1,0 +1,11 @@
+targets:
+  - https://example.com
+identities: identities.yaml
+auth: user
+smart: true
+
+targets:
+  - https://example.com
+identities: identities.yaml
+auth: user
+smart: true
