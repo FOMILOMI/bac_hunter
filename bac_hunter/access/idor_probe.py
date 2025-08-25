@@ -1,6 +1,7 @@
 from __future__ import annotations
 import logging
 import re
+import asyncio
 from urllib.parse import urlparse, urlunparse, urlencode, parse_qsl
 from typing import List
 
@@ -8,11 +9,13 @@ try:
 	from ..config import Identity, Settings
 	from ..http_client import HttpClient
 	from ..storage import Storage
+	from ..utils import normalize_url, is_recursive_duplicate_path
 	from .comparator import ResponseComparator
 except Exception:
 	from config import Identity, Settings
 	from http_client import HttpClient
 	from storage import Storage
+	from utils import normalize_url, is_recursive_duplicate_path
 	from access.comparator import ResponseComparator
 
 log = logging.getLogger("access.idor")
@@ -50,12 +53,16 @@ class IDORProbe:
         q2 = ID_RE.sub(lambda m: str(max(0, int(m.group("id")) + 1)), q, count=1)
         if q2 != q:
             out.append(urlunparse(parsed._replace(query=q2)))
-        # duplicate last path segment (common list/detail pattern)
+        # duplicate last path segment only for numeric/UUID segments (avoid /admin/admin)
         segs = [s for s in path.split('/') if s]
         if segs:
-            dup = '/' + '/'.join(segs + [segs[-1]])
-            if dup != path:
-                out.append(urlunparse(parsed._replace(path=dup)))
+            last = segs[-1]
+            is_numeric = bool(re.fullmatch(r"\b\d{1,10}\b", last))
+            is_uuid = bool(UUID_RE.fullmatch(last))
+            if is_numeric or is_uuid:
+                dup = '/' + '/'.join(segs + [last])
+                if dup != path:
+                    out.append(urlunparse(parsed._replace(path=dup)))
         # boolean flips in query
         params = parse_qsl(parsed.query, keep_blank_values=True)
         for i, (k, v) in enumerate(params):
@@ -65,22 +72,37 @@ class IDORProbe:
                 new[i] = (k, "false" if lv in ("true", "1", "yes") else "true")
                 out.append(urlunparse(parsed._replace(query=urlencode(new, doseq=True))))
                 break
-        # uniq and cap
-        uniq = []
+        # normalize, drop recursive duplicates and dedup
+        uniq: List[str] = []
         seen = set()
         for u in out:
-            if u not in seen:
-                seen.add(u); uniq.append(u)
+            nu = normalize_url(u)
+            if is_recursive_duplicate_path(urlparse(nu).path):
+                if getattr(self.s, 'smart_dedup_enabled', False):
+                    log.info("[!] Skipping nonsensical path expansion: %s", nu)
+                continue
+            if nu not in seen:
+                seen.add(nu); uniq.append(nu)
         return uniq[:max_variants]
 
     async def test(self, base_url: str, url: str, low_priv: Identity, other_priv: Identity) -> None:
-        r0 = await self.http.get(url, headers=low_priv.headers())
-        self.db.save_probe(url=url, identity=low_priv.name, status=r0.status_code, length=len(r0.content), content_type=r0.headers.get("content-type"), body=b"")
-        for v in self.variants(url):
+        base_n = normalize_url(url)
+        r0 = await self.http.get(base_n, headers=low_priv.headers())
+        self.db.save_probe(url=base_n, identity=low_priv.name, status=r0.status_code, length=len(r0.content), content_type=r0.headers.get("content-type"), body=b"")
+        if getattr(self.s, 'smart_backoff_enabled', False) and r0.status_code == 429:
+            log.warning("[!] Rate limited (429) on %s, backing off", base_n)
+            await asyncio.sleep(2.0)
+        for v in self.variants(base_n):
             rv = await self.http.get(v, headers=low_priv.headers())
             self.db.save_probe(url=v, identity=low_priv.name, status=rv.status_code, length=len(rv.content), content_type=rv.headers.get("content-type"), body=b"")
+            if getattr(self.s, 'smart_backoff_enabled', False) and rv.status_code == 429:
+                log.warning("[!] Rate limited (429) on %s, backing off", v)
+                await asyncio.sleep(2.0)
             ro = await self.http.get(v, headers=other_priv.headers())
             self.db.save_probe(url=v, identity=other_priv.name, status=ro.status_code, length=len(ro.content), content_type=ro.headers.get("content-type"), body=b"")
+            if getattr(self.s, 'smart_backoff_enabled', False) and ro.status_code == 429:
+                log.warning("[!] Rate limited (429) on %s (other), backing off", v)
+                await asyncio.sleep(2.0)
             diff = self.cmp.compare(r0.status_code, len(r0.content), r0.headers.get("content-type"), None,
                                     rv.status_code, len(rv.content), rv.headers.get("content-type"), None)
             if rv.status_code in (200, 206) and (not diff.same_status or not diff.same_length_bucket):

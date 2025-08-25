@@ -1,6 +1,6 @@
 import random
 import asyncio
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, urlunparse
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120",
@@ -30,3 +30,40 @@ async def jitter(ms: int):
     if ms <= 0:
         return
     await asyncio.sleep(random.uniform(0, ms / 1000.0))
+
+
+# --- Smart path helpers for deduplication and normalization ---
+def normalize_path(path: str) -> str:
+	"""Normalize a URL path: ensure leading slash, collapse duplicate slashes,
+	remove trailing slash except for root."""
+	if not path:
+		return "/"
+	# ensure leading slash
+	if not path.startswith('/'):
+		path = '/' + path
+	# collapse multiple slashes
+	while '//' in path:
+		path = path.replace('//', '/')
+	# remove trailing slash except root
+	if len(path) > 1 and path.endswith('/'):
+		path = path[:-1]
+	return path
+
+
+def normalize_url(url: str) -> str:
+	"""Normalize a full URL by normalizing the path component only."""
+	parsed = urlparse(url)
+	new_path = normalize_path(parsed.path)
+	return urlunparse(parsed._replace(path=new_path))
+
+
+def is_recursive_duplicate_path(path: str) -> bool:
+	"""Detect nonsensical recursive duplicates like /admin/admin or /v2/v2.
+
+	Heuristic: adjacent duplicate segments anywhere in the path.
+	"""
+	segs = [s for s in path.split('/') if s]
+	for i in range(1, len(segs)):
+		if segs[i].lower() == segs[i - 1].lower():
+			return True
+	return False

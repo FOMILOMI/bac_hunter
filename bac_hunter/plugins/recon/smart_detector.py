@@ -45,23 +45,47 @@ class SmartEndpointDetector(Plugin):
             self.db.save_page(target_id, start_url, r.status_code, r.headers.get("content-type"), r.content)
             if r.status_code == 200 and r.text:
                 for m in ENDPOINT_RE.finditer(r.text):
-                    collected.add(urljoin(base_url, m.group(1)))
+                    u = urljoin(base_url, m.group(1))
+                    # normalize and skip recursive duplicates like /admin/admin
+                    try:
+                        from ...utils import normalize_url, is_recursive_duplicate_path
+                    except Exception:
+                        from utils import normalize_url, is_recursive_duplicate_path
+                    u_n = normalize_url(u)
+                    if is_recursive_duplicate_path(u_n.split('://',1)[-1].split('/',1)[-1] if '://' in u_n else u_n):
+                        if getattr(self.s, 'smart_dedup_enabled', False):
+                            log.info("[!] Skipping duplicate endpoint: %s", u_n)
+                        continue
+                    collected.add(u_n)
         except Exception as e:
             log.debug("homepage fetch failed: %s", e)
 
         # 2) Probe known admin/API candidates conservatively
         for path in ADMIN_CANDIDATES + API_CANDIDATES:
             url = urljoin(base_url, path)
-            if url in collected:
+            try:
+                from ...utils import normalize_url, is_recursive_duplicate_path
+            except Exception:
+                from utils import normalize_url, is_recursive_duplicate_path
+            url_n = normalize_url(url)
+            if is_recursive_duplicate_path(url_n.split('://',1)[-1].split('/',1)[-1] if '://' in url_n else url_n):
+                if getattr(self.s, 'smart_dedup_enabled', False):
+                    log.info("[!] Skipping duplicate endpoint: %s", url_n)
+                continue
+            if url_n in collected:
                 continue
             try:
-                resp = await self.http.get(url)
+                resp = await self.http.get(url_n)
                 # Record pages lightly; only store body for 2xx text to avoid bloat
                 content_type = resp.headers.get("content-type", "")
                 body_bytes = resp.content if (resp.status_code < 400 and content_type.lower().startswith("text/")) else b""
-                self.db.save_page(target_id, url, resp.status_code, content_type, body_bytes)
+                self.db.save_page(target_id, url_n, resp.status_code, content_type, body_bytes)
                 if resp.status_code in (200, 401, 403):
-                    collected.add(url)
+                    collected.add(url_n)
+                if getattr(self.s, 'smart_backoff_enabled', False) and resp.status_code == 429:
+                    log.warning("[!] Rate limited (429) on %s, backing off", url_n)
+                    import asyncio as _aio
+                    await _aio.sleep(2.0)
             except Exception:
                 continue
 

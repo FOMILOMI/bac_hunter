@@ -150,6 +150,12 @@ def smart_auto(
 ):
     settings = Settings()
     setup_logging(verbose)
+    # Enable smart dedup/backoff only for smart-auto to preserve backward compatibility
+    try:
+        settings.smart_dedup_enabled = True
+        settings.smart_backoff_enabled = True
+    except Exception:
+        pass
     db = Storage(settings.db_path)
     sm = SessionManager()
     if identities_yaml:
