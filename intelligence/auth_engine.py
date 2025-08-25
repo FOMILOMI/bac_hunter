@@ -144,7 +144,7 @@ class CredentialInferenceEngine:
     def infer_usernames(self, base_url: str) -> List[str]:
         # Extract hinted usernames from stored pages (errors, forms)
         hints: List[str] = []
-        for _, _, url, status, ctype, body in self._iter_pages(base_url):
+        for _, url, status, ctype, body in self._iter_pages(base_url):
             if status >= 400 or (ctype or "").lower().startswith("text/"):
                 text = (body or b"").decode(errors="ignore")
                 hints.extend(re.findall(r"(?:user(?:name)?|email)\W+([a-zA-Z0-9._%+-]{3,32})", text, flags=re.IGNORECASE))
