@@ -26,7 +26,11 @@ try:
     from .advanced.parameter_miner import ParameterMiner
     from .fallback import PathScanner, ParamScanner
     from .profiling import TargetProfiler
-    from .webapp import app as dashboard_app
+    # Dashboard import is optional to avoid FastAPI requirement during CLI import in tests
+    try:
+        from .webapp import app as dashboard_app  # type: ignore
+    except Exception:
+        dashboard_app = None  # type: ignore
 except Exception:  # fallback when executed as a top-level module
     from config import Settings, Identity
     from modes import get_mode_profile
@@ -45,27 +49,30 @@ except Exception:  # fallback when executed as a top-level module
     from advanced import ParameterMiner
     from fallback import PathScanner, ParamScanner
     from profiling import TargetProfiler
-    from webapp import app as dashboard_app
+    try:
+        from webapp import app as dashboard_app  # type: ignore
+    except Exception:
+        dashboard_app = None  # type: ignore
 try:
-    from .intelligence import (
-        AutonomousAuthEngine,
-        CredentialInferenceEngine,
-        SmartAuthDetector,
-        IntelligentIdentityFactory,
-        SmartSessionManager as SmartSessMgr,
-        IntelligentTargetProfiler,
-        InteractiveGuidanceSystem,
-    )
+	from .intelligence import (
+		AutonomousAuthEngine,
+		CredentialInferenceEngine,
+		SmartAuthDetector,
+		IntelligentIdentityFactory,
+		SmartSessionManager as SmartSessMgr,
+		IntelligentTargetProfiler,
+		InteractiveGuidanceSystem,
+	)
 except Exception:
-    from intelligence import (
-        AutonomousAuthEngine,
-        CredentialInferenceEngine,
-        SmartAuthDetector,
-        IntelligentIdentityFactory,
-        SmartSessionManager as SmartSessMgr,
-        IntelligentTargetProfiler,
-        InteractiveGuidanceSystem,
-    )
+	from intelligence import (
+		AutonomousAuthEngine,
+		CredentialInferenceEngine,
+		SmartAuthDetector,
+		IntelligentIdentityFactory,
+		SmartSessionManager as SmartSessMgr,
+		IntelligentTargetProfiler,
+		InteractiveGuidanceSystem,
+	)
 try:
 	from .intelligence.ai import (
 		BAC_ML_Engine,
@@ -974,7 +981,10 @@ def dashboard(
     port: int = typer.Option(8000, help="Bind port"),
     reload: bool = typer.Option(False, help="Auto-reload on code changes"),
 ):
-    uvicorn.run(dashboard_app, host=host, port=port, reload=reload)
+    if dashboard_app:
+        uvicorn.run(dashboard_app, host=host, port=port, reload=reload)
+    else:
+        typer.echo("[warn] Dashboard app not available. Skipping dashboard start.")
 
 
 @app.command()
