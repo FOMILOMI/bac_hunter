@@ -149,6 +149,11 @@ def recon(
                 http.attach_session_manager(sm)
             except Exception:
                 pass
+            # Pre-login for all targets (opens browser if missing/expired)
+            try:
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 plugins = []
@@ -229,6 +234,12 @@ def smart_auto(
         http = HttpClient(settings)
         profiler = TargetProfiler(settings, http)
         try:
+            # Attach and pre-login
+            try:
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 # 1) Profile
@@ -317,6 +328,13 @@ def smart_scan(
         idfactory = IntelligentIdentityFactory(settings, http, db)
         smartsess = SmartSessMgr(settings, http)
         try:
+            # Attach and pre-login
+            try:
+                sm = SessionManager()
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 evt = guide.emit("start", f"Profiling {base}")
@@ -394,6 +412,13 @@ def stealth_scan(
     async def run_all():
         http = HttpClient(settings)
         try:
+            # Attach and pre-login
+            try:
+                sm = SessionManager()
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 # Minimal recon only
@@ -433,6 +458,13 @@ def full_audit(
         http = HttpClient(settings)
         profiler = TargetProfiler(settings, http)
         try:
+            # Attach and pre-login
+            try:
+                sm = SessionManager()
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 _ = await profiler.profile(base, Identity(name="anon"))
@@ -492,6 +524,12 @@ def quickscan(
         idor = IDORProbe(settings, http, db)
         fb = ForceBrowser(settings, http, db)
         try:
+            # Attach and pre-login using existing SessionManager (with identities)
+            try:
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 prof = await profiler.profile(base, unauth)
@@ -818,6 +856,13 @@ def scan_quick(
     async def run_all():
         http = HttpClient(settings)
         try:
+            # Attach and pre-login
+            try:
+                sm = SessionManager()
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 # Minimal recon + access sample
@@ -860,6 +905,13 @@ def scan_custom(
     async def run_all():
         http = HttpClient(settings)
         try:
+            # Attach and pre-login
+            try:
+                sm = SessionManager()
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 if "recon" in chosen:
@@ -1155,6 +1207,12 @@ def audit(
     async def run_all():
         http = HttpClient(settings)
         try:
+            # Attach and pre-login using existing SessionManager (with identities)
+            try:
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             headers = HeaderInspector(settings, http, db)
             toggles = ParamToggle(settings, http, db)
             for base in settings.targets:
@@ -1226,6 +1284,12 @@ def access(
     async def run_all():
         http = HttpClient(settings)
         try:
+            # Attach and pre-login using existing SessionManager (with identities)
+            try:
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             diff = DifferentialTester(settings, http, db)
             idor = IDORProbe(settings, http, db)
             fb = ForceBrowser(settings, http, db)
@@ -1311,6 +1375,12 @@ def exploit(
     async def run_all():
         http = HttpClient(settings)
         try:
+            # Attach and pre-login using existing SessionManager (with identities)
+            try:
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             pet = PrivilegeEscalationTester(settings, http, db)
             miner = ParameterMiner(settings, http, db)
             for base in settings.targets:

@@ -38,6 +38,9 @@ class SessionManager:
         self._login_path_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.IGNORECASE)
         # Optional extractors for custom apps to provide tokens
         self._token_extractors: List[Callable[[object], Dict[str, str]]] = []
+        # Internal clock helper
+        import time as _t  # lazy to avoid global import noise
+        self._now = _t.time
 
     def configure(self, *, sessions_dir: str, browser_driver: Optional[str] = None, login_timeout_seconds: Optional[int] = None, enable_semi_auto_login: Optional[bool] = None):
         import os
@@ -154,7 +157,10 @@ class SessionManager:
         h: Dict[str, str] = {}
         if base_headers:
             h.update(base_headers)
-        cookie_header = self._cookie_header_from_cookies(sess.get("cookies") or [])
+        # Filter out expired cookies to avoid sending stale values
+        cookies_all = sess.get("cookies") or []
+        cookies_valid = [c for c in cookies_all if self._cookie_is_valid(c)]
+        cookie_header = self._cookie_header_from_cookies(cookies_valid)
         if cookie_header:
             h["Cookie"] = cookie_header
         if sess.get("bearer"):
@@ -172,6 +178,25 @@ class SessionManager:
                 continue
             pairs.append(f"{name}={val}")
         return "; ".join(pairs)
+
+    def _cookie_is_valid(self, cookie: dict) -> bool:
+        """Return True if cookie is not expired.
+        Supports both Playwright ('expires') and Selenium ('expiry') fields.
+        Session cookies (no expiry or 0) are treated as valid.
+        """
+        try:
+            exp = cookie.get("expires")
+            if exp is None:
+                exp = cookie.get("expiry")
+            if exp in (None, 0, "0", ""):
+                return True
+            try:
+                expf = float(exp)
+            except Exception:
+                return True
+            return expf > self._now()
+        except Exception:
+            return True
 
     # ---- Modular API for auth-aware scanning ----
     def check_auth_required(self, response) -> bool:
@@ -322,6 +347,68 @@ class SessionManager:
             return None
         sess = self.load_domain_session(dom)
         return sess.get("csrf") if isinstance(sess.get("csrf"), str) else None
+
+    # ---- Interactive pre-login helpers ----
+    def has_valid_session(self, domain_or_url: str) -> bool:
+        """Check if we have any non-expired cookie or a bearer token for the domain."""
+        dom = domain_or_url
+        try:
+            if "://" in domain_or_url:
+                dom = self._hostname_from_url(domain_or_url) or ""
+        except Exception:
+            pass
+        if not dom:
+            return False
+        sess = self.load_domain_session(dom)
+        try:
+            cookies = sess.get("cookies") or []
+            for c in cookies:
+                if self._cookie_is_valid(c):
+                    return True
+        except Exception:
+            pass
+        try:
+            if isinstance(sess.get("bearer"), str) and sess.get("bearer"):
+                return True
+        except Exception:
+            pass
+        return False
+
+    def ensure_logged_in(self, domain_or_url: str) -> bool:
+        """Ensure user has logged in for the given domain. Triggers browser if needed.
+        Returns True if a valid session exists after this call.
+        """
+        if not self._enable_semi_auto_login:
+            return False
+        if self.has_valid_session(domain_or_url):
+            return True
+        ok = self.open_browser_login(domain_or_url)
+        if not ok:
+            return False
+        return self.has_valid_session(domain_or_url)
+
+    def prelogin_targets(self, targets: List[str]):
+        """Open a browser for each unique domain to let the user log in once per run.
+        Safe no-op if sessions already exist and are valid.
+        """
+        if not self._enable_semi_auto_login:
+            return
+        # Deduplicate by hostname
+        seen: set[str] = set()
+        for t in targets or []:
+            try:
+                dom = self._hostname_from_url(t) or t
+            except Exception:
+                dom = t
+            if not dom or dom in seen:
+                continue
+            seen.add(dom)
+            try:
+                # Only open browser when session missing/expired
+                if not self.has_valid_session(dom):
+                    self.open_browser_login(dom)
+            except Exception:
+                continue
 
     def open_browser_login(self, domain_or_url: str) -> bool:
         """Open an interactive browser for manual login and persist the session.
