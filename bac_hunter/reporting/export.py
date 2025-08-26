@@ -64,14 +64,20 @@ class Exporter:
             rec_sections.append(f"<details><summary>{self._escape(t)} on {self._escape(u)}</summary><ul>" + "".join(f"<li>{self._escape(x)}</li>" for x in tips) + "</ul></details>")
         parts = [
             "<!doctype html><meta charset='utf-8'><title>BAC Hunter Report</title>",
-            "<style>body{font-family:system-ui,Segoe UI,Roboto,sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f6f6f6;text-align:left}tr:hover{background:#fafafa}details{margin:8px 0}</style>",
+            "<style>body{font-family:system-ui,Segoe UI,Roboto,sans-serif;padding:24px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:8px}th{background:#f6f6f6;text-align:left}tr:hover{background:#fafafa}details{margin:8px 0}.badge{padding:2px 6px;border-radius:4px;font-size:12px}.ok{background:#e6ffed;color:#037d50}.warn{background:#fff4e5;color:#9a6700}</style>",
             f"<h1>BAC Hunter Report</h1><p>Generated {now}</p>",
             "<h2>Findings</h2>",
             "<table><thead><tr><th>#</th><th>Base</th><th>Type</th><th>URL</th><th>Evidence</th><th>Score</th></tr></thead><tbody>"
         ]
         for i, (base, t, u, e, s) in enumerate(rows, start=1):
+            badge = ""
+            te = (e or "").lower()
+            if "confirmed" in te:
+                badge = " <span class='badge ok'>confirmed</span>"
+            elif t.startswith("idor"):
+                badge = " <span class='badge warn'>suspected</span>"
             parts.append(
-                f"<tr><td>{i}</td><td>{self._escape(base)}</td><td>{self._escape(t)}</td><td><a href='{self._escape(u)}' target='_blank'>{self._escape(u)}</a></td><td>{self._escape(self._redact(e))}</td><td>{s:.2f}</td></tr>"
+                f"<tr><td>{i}</td><td>{self._escape(base)}</td><td>{self._escape(t)}{badge}</td><td><a href='{self._escape(u)}' target='_blank'>{self._escape(u)}</a></td><td>{self._escape(self._redact(e))}</td><td>{s:.2f}</td></tr>"
             )
         parts.append("</tbody></table>")
         if rec_sections:
@@ -92,6 +98,17 @@ class Exporter:
                     "score": float(s),
                     "recommendations": self.reco.suggest(t),
                 }
+                for (base, t, u, e, s) in c.execute("SELECT t.base_url, f.type, f.url, f.evidence, f.score FROM findings f JOIN targets t ON f.target_id=t.id ORDER BY f.score DESC, f.id DESC")
+            ]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"generated_at": datetime.utcnow().isoformat() + "Z", "findings": rows}, f, indent=2)
+        return path
+
+    def to_json_detailed(self, path: str = "findings_detailed.json"):
+        """Richer JSON format with fields ready for reproduction steps."""
+        with self.db.conn() as c:
+            rows = [
+                {"base": base, "type": t, "url": u, "evidence": self._redact(e), "score": float(s), "curl": self._curl_for(u)}
                 for (base, t, u, e, s) in c.execute("SELECT t.base_url, f.type, f.url, f.evidence, f.score FROM findings f JOIN targets t ON f.target_id=t.id ORDER BY f.score DESC, f.id DESC")
             ]
         with open(path, "w", encoding="utf-8") as f:
@@ -186,3 +203,7 @@ class Exporter:
         # cookies/session IDs patterns (basic)
         out = re.sub(r"(session|sess|sid|csrftoken|xsrf)[=:\s][^;\s]{8,}", r"\1=[redacted]", out, flags=re.IGNORECASE)
         return out
+
+    def _curl_for(self, url: str) -> str:
+        # Minimal curl with redacted cookies; real headers depend on runtime identities
+        return f"curl -i '{url}' -H 'User-Agent: bac-hunter'"

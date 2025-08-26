@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple, Callable
 try:
     from .config import Identity
     from .utils import pick_ua
@@ -15,12 +15,19 @@ log = logging.getLogger("session")
 
 
 class SessionManager:
-    """Lightweight identity registry for low-noise differential testing later."""
+    """Lightweight identity registry for low-noise differential testing later.
+
+    Extended to support:
+    - Per-domain session persistence (cookies, bearer)
+    - Response processing to capture Set-Cookie, bearer tokens, and CSRF tokens
+    - Identity metadata (role/user_id/tenant_id) and pairing helpers
+    - Semi-automatic login via browser driver
+    """
 
     def __init__(self):
         self._identities: Dict[str, Identity] = {}
         self.add_identity(Identity(name="anon", base_headers={"User-Agent": pick_ua()}))
-        # Domain -> session dict {cookies: list, bearer: str}
+        # Domain -> session dict {cookies: list, bearer: str, csrf: str}
         self._domain_sessions: Dict[str, Dict[str, object]] = {}
         self._sessions_dir: Optional[str] = None
         # Interactive login configuration
@@ -29,6 +36,8 @@ class SessionManager:
         self._enable_semi_auto_login: bool = True
         # Common login path hints for redirect detection
         self._login_path_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.IGNORECASE)
+        # Optional extractors for custom apps to provide tokens
+        self._token_extractors: List[Callable[[object], Dict[str, str]]] = []
 
     def configure(self, *, sessions_dir: str, browser_driver: Optional[str] = None, login_timeout_seconds: Optional[int] = None, enable_semi_auto_login: Optional[bool] = None):
         import os
@@ -59,6 +68,39 @@ class SessionManager:
     def all(self):
         return list(self._identities.values())
 
+    def set_identity_metadata(self, name: str, *, role: Optional[str] = None, user_id: Optional[str] = None, tenant_id: Optional[str] = None):
+        ident = self._identities.get(name)
+        if not ident:
+            return
+        if role is not None:
+            ident.role = role
+        if user_id is not None:
+            ident.user_id = user_id
+        if tenant_id is not None:
+            ident.tenant_id = tenant_id
+
+    def choose_pairs(self, strategy: str = "horizontal") -> List[Tuple[Identity, Identity]]:
+        pairs: List[Tuple[Identity, Identity]] = []
+        ids = [i for i in self.all() if i.name != "anon"]
+        if strategy == "horizontal":
+            # same role, different user_id
+            for i in range(len(ids)):
+                for j in range(i + 1, len(ids)):
+                    a, b = ids[i], ids[j]
+                    if a.role and b.role and a.role == b.role and a.user_id and b.user_id and a.user_id != b.user_id:
+                        pairs.append((a, b))
+        else:
+            # vertical: different roles when known
+            for i in range(len(ids)):
+                for j in range(i + 1, len(ids)):
+                    a, b = ids[i], ids[j]
+                    if a.role and b.role and a.role != b.role:
+                        pairs.append((a, b))
+        return pairs
+
+    def register_token_extractors(self, extractors: List[Callable[[object], Dict[str, str]]]):
+        self._token_extractors = extractors or []
+
     def load_yaml(self, path: str):
         import yaml
         with open(path, "r", encoding="utf-8") as f:
@@ -70,7 +112,10 @@ class SessionManager:
             base_headers = item.get("headers", {}) or {}
             cookie = item.get("cookie")
             bearer = item.get("auth_bearer") or item.get("bearer")
-            self.add_identity(Identity(name=name, base_headers=base_headers, cookie=cookie, auth_bearer=bearer))
+            role = item.get("role")
+            user_id = item.get("user_id")
+            tenant_id = item.get("tenant_id")
+            self.add_identity(Identity(name=name, base_headers=base_headers, cookie=cookie, auth_bearer=bearer, role=role, user_id=user_id, tenant_id=tenant_id))
 
     # ---- Per-domain sessions (cookie/bearer) ----
     def load_domain_session(self, domain: str) -> Dict[str, object]:
@@ -79,21 +124,22 @@ class SessionManager:
             return self._domain_sessions[domain]
         path = self._session_path(domain)
         if not path or not os.path.exists(path):
-            self._domain_sessions[domain] = {"cookies": [], "bearer": None}
+            self._domain_sessions[domain] = {"cookies": [], "bearer": None, "csrf": None}
             return self._domain_sessions[domain]
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f) or {}
             cookies = data.get("cookies") or []
             bearer = data.get("bearer")
-            self._domain_sessions[domain] = {"cookies": cookies, "bearer": bearer}
+            csrf = data.get("csrf")
+            self._domain_sessions[domain] = {"cookies": cookies, "bearer": bearer, "csrf": csrf}
         except Exception:
-            self._domain_sessions[domain] = {"cookies": [], "bearer": None}
+            self._domain_sessions[domain] = {"cookies": [], "bearer": None, "csrf": None}
         return self._domain_sessions[domain]
 
-    def save_domain_session(self, domain: str, cookies: list, bearer: Optional[str] = None):
+    def save_domain_session(self, domain: str, cookies: list, bearer: Optional[str] = None, csrf: Optional[str] = None):
         import json
-        self._domain_sessions[domain] = {"cookies": cookies or [], "bearer": bearer}
+        self._domain_sessions[domain] = {"cookies": cookies or [], "bearer": bearer, "csrf": csrf}
         path = self._session_path(domain)
         if not path:
             return
@@ -113,6 +159,7 @@ class SessionManager:
             h["Cookie"] = cookie_header
         if sess.get("bearer"):
             h["Authorization"] = f"Bearer {sess['bearer']}"
+        # CSRF: only attach if caller already set a known header to avoid breakage; expose getter for clients
         return h
 
     def _cookie_header_from_cookies(self, cookies: list) -> str:
@@ -153,6 +200,91 @@ class SessionManager:
                 return True
         # Explicitly avoid 404/broken links
         return False
+
+    def process_response(self, url: str, response) -> None:
+        """Capture Set-Cookie, bearer tokens (if present), and CSRF tokens from responses.
+        This is best-effort and safe; errors are swallowed.
+        """
+        domain = self._hostname_from_url(url) or ""
+        if not domain:
+            return
+        sess = self.load_domain_session(domain)
+        # Capture Set-Cookie
+        try:
+            set_cookie = response.headers.get("set-cookie") or response.headers.get("Set-Cookie")
+            if set_cookie:
+                # Simple cookie parser (split on ';', handle first key=value)
+                parts = [p.strip() for p in set_cookie.split(',') if p.strip()]
+                # Some servers send multiple cookies separated by comma; process conservatively
+                for part in parts:
+                    kv = part.split(';', 1)[0]
+                    if '=' in kv:
+                        name, val = kv.split('=', 1)
+                        if name and val:
+                            # Upsert cookie by name
+                            cookies = sess.get("cookies") or []
+                            found = False
+                            for c in cookies:
+                                if c.get("name") == name:
+                                    c["value"] = val
+                                    found = True
+                                    break
+                            if not found:
+                                cookies.append({"name": name, "value": val})
+                            sess["cookies"] = cookies
+        except Exception:
+            pass
+        # Capture bearer tokens using custom extractors and common JSON shapes
+        try:
+            token: Optional[str] = None
+            for ex in self._token_extractors:
+                try:
+                    out = ex(response) or {}
+                    token = out.get("bearer") or token
+                except Exception:
+                    continue
+            if not token:
+                ct = (response.headers.get("content-type") or "").lower()
+                if "json" in ct and hasattr(response, "json"):
+                    try:
+                        data = response.json()
+                        token = data.get("access_token") or data.get("token") or None
+                    except Exception:
+                        token = None
+            if token:
+                sess["bearer"] = token
+        except Exception:
+            pass
+        # CSRF token capture from HTML
+        try:
+            text = response.text if hasattr(response, "text") else ""
+            if text:
+                m = re.search(r"<meta[^>]+name=\"csrf[^\"]*\"[^>]+content=\"([^\"]+)\"", text, flags=re.I)
+                if m:
+                    sess["csrf"] = m.group(1)
+                else:
+                    m = re.search(r"<input[^>]+type=\"hidden\"[^>]+name=\"(csrf|_csrf|csrf_token)\"[^>]+value=\"([^\"]+)\"", text, flags=re.I)
+                    if m:
+                        sess["csrf"] = m.group(2)
+        except Exception:
+            pass
+        # Persist updated session
+        try:
+            self.save_domain_session(domain, sess.get("cookies") or [], sess.get("bearer"), sess.get("csrf"))
+        except Exception:
+            pass
+
+    def get_csrf(self, domain_or_url: str) -> Optional[str]:
+        dom = domain_or_url
+        try:
+            if "://" in domain_or_url:
+                dom = self._hostname_from_url(domain_or_url) or ""
+        except Exception:
+            pass
+        if not dom:
+            return None
+        sess = self.load_domain_session(dom)
+        return sess.get("csrf") if isinstance(sess.get("csrf"), str) else None
 
     def open_browser_login(self, domain_or_url: str) -> bool:
         """Open an interactive browser for manual login and persist the session.

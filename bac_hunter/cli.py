@@ -16,6 +16,7 @@ try:
     from .storage import Storage
     from .session_manager import SessionManager
     from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector, AuthDiscoveryRecon
+    from .plugins.recon.openapi import OpenAPIRecon
     from .plugins import GraphQLTester
     from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
     from .audit import HeaderInspector, ParamToggle
@@ -39,6 +40,7 @@ except Exception:  # fallback when executed as a top-level module
     from storage import Storage
     from session_manager import SessionManager
     from plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector, AuthDiscoveryRecon
+    from plugins.recon.openapi import OpenAPIRecon
     from plugins import GraphQLTester
     from access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
     from audit import HeaderInspector, ParamToggle
@@ -159,6 +161,9 @@ def recon(
                     plugins.append(JSEndpointsRecon(settings, http, db))
                 # Smart endpoint detection
                 plugins.append(SmartEndpointDetector(settings, http, db))
+                # OpenAPI when enabled
+                if settings.enable_recon_openapi:
+                    plugins.append(OpenAPIRecon(settings, http, db))
                 # Auth discovery
                 plugins.append(AuthDiscoveryRecon(settings, http, db))
                 # Optional GraphQL testing
@@ -236,6 +241,7 @@ def smart_auto(
                     SitemapRecon(settings, http, db),
                     JSEndpointsRecon(settings, http, db),
                     SmartEndpointDetector(settings, http, db),
+                    *( [OpenAPIRecon(settings, http, db)] if settings.enable_recon_openapi else [] ),
                     AuthDiscoveryRecon(settings, http, db),
                 ):
                     try:
@@ -325,6 +331,7 @@ def smart_scan(
                     SitemapRecon(settings, http, db),
                     JSEndpointsRecon(settings, http, db),
                     SmartEndpointDetector(settings, http, db),
+                    *( [OpenAPIRecon(settings, http, db)] if settings.enable_recon_openapi else [] ),
                     AuthDiscoveryRecon(settings, http, db),
                 ):
                     try:
@@ -436,6 +443,7 @@ def full_audit(
                     SitemapRecon(settings, http, db),
                     JSEndpointsRecon(settings, http, db),
                     SmartEndpointDetector(settings, http, db),
+                    *( [OpenAPIRecon(settings, http, db)] if settings.enable_recon_openapi else [] ),
                     AuthDiscoveryRecon(settings, http, db),
                 ):
                     try:
@@ -490,7 +498,7 @@ def quickscan(
                 prof = await profiler.profile(base, unauth)
                 typer.echo(f"[profile] kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
                 # Recon
-                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db), SmartEndpointDetector(settings, http, db), AuthDiscoveryRecon(settings, http, db)):
+                for p in (RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db), SmartEndpointDetector(settings, http, db), *( [OpenAPIRecon(settings, http, db)] if settings.enable_recon_openapi else [] ), AuthDiscoveryRecon(settings, http, db)):
                     try:
                         await p.run(base, tid)
                     except Exception:
@@ -548,6 +556,8 @@ def scan(
                 plugins = [RobotsRecon(settings, http, db), SitemapRecon(settings, http, db), JSEndpointsRecon(settings, http, db)]
                 if smart_mode:
                     plugins.append(SmartEndpointDetector(settings, http, db))
+                    if settings.enable_recon_openapi:
+                        plugins.append(OpenAPIRecon(settings, http, db))
                     plugins.append(AuthDiscoveryRecon(settings, http, db))
                 for p in plugins:
                     try:
@@ -774,6 +784,8 @@ def scan_full(
             path = ex.to_csv(report)
         elif rp.endswith('.json'):
             path = ex.to_json(report)
+        elif rp.endswith('.detailed.json'):
+            path = ex.to_json_detailed(report)
         elif rp.endswith('.sarif'):
             path = ex.to_sarif(report)
         elif rp.endswith('.pdf'):
