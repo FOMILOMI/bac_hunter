@@ -56,8 +56,13 @@ class HttpClient:
         """Attach session manager after construction to avoid circular imports."""
         self._session_mgr = session_manager
         try:
-            # Ensure sessions directory exists
-            self._session_mgr.configure(sessions_dir=self.s.sessions_dir)
+            # Ensure sessions directory exists and pass browser settings
+            self._session_mgr.configure(
+                sessions_dir=self.s.sessions_dir,
+                browser_driver=self.s.browser_driver,
+                login_timeout_seconds=self.s.login_timeout_seconds,
+                enable_semi_auto_login=self.s.enable_semi_auto_login,
+            )
         except Exception:
             pass
 
@@ -69,7 +74,12 @@ class HttpClient:
                 from session_manager import SessionManager
             try:
                 self._session_mgr = SessionManager()
-                self._session_mgr.configure(sessions_dir=self.s.sessions_dir)
+                self._session_mgr.configure(
+                    sessions_dir=self.s.sessions_dir,
+                    browser_driver=self.s.browser_driver,
+                    login_timeout_seconds=self.s.login_timeout_seconds,
+                    enable_semi_auto_login=self.s.enable_semi_auto_login,
+                )
             except Exception:
                 self._session_mgr = None
 
@@ -107,11 +117,8 @@ class HttpClient:
         if not self._session_mgr:
             return headers
         try:
-            host = host_of(url)
-            domain_headers = self._session_mgr.build_domain_headers(host)
-            # Merge domain session headers while preserving explicit headers
-            out = {**domain_headers, **headers}
-            return out
+            # Attach per-domain cookies/bearer to the request headers
+            return self._session_mgr.attach_session(url, headers)
         except Exception:
             return headers
 
@@ -122,23 +129,11 @@ class HttpClient:
             self._ensure_session_manager()
         if not self._session_mgr:
             return False
-        from .integrations.browser_automation import InteractiveLogin  # lazy import
         try:
-            base = url
-            # Print clear terminal message
-            try:
-                log.warning(f"[!] Authentication required for {base} - Opening browser, please login manually...")
-            except Exception:
-                pass
-            driver = InteractiveLogin(driver=self.s.browser_driver)
-            cookies, bearer = driver.open_and_wait(base, timeout_seconds=self.s.login_timeout_seconds)
-            if cookies or bearer:
-                host = host_of(url)
-                self._session_mgr.save_domain_session(host, cookies, bearer)
-                return True
+            # Delegate to session manager for interactive login and persistence
+            return bool(self._session_mgr.open_browser_login(url))
         except Exception:
             return False
-        return False
 
     def _auth_state_from_headers(self, headers: Dict[str, str]) -> str:
         auth = (headers.get("Authorization") or "").lower()
@@ -270,8 +265,16 @@ class HttpClient:
                         log.debug("%s %s -> %s", method.upper(), url, r.status_code)
                     ident = h.get("X-BH-Identity", "unknown")
                     self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
-                    # If 401/403, try interactive login and retry once per attempt 0
-                    if r.status_code in (401, 403) and self.s.enable_semi_auto_login and attempt == 0:
+                    # If auth is required (401/403 or redirect to login), try interactive login and retry once
+                    try:
+                        requires_auth = False
+                        if self._session_mgr and hasattr(self._session_mgr, "check_auth_required"):
+                            requires_auth = bool(self._session_mgr.check_auth_required(r))
+                        else:
+                            requires_auth = r.status_code in (401, 403)
+                    except Exception:
+                        requires_auth = r.status_code in (401, 403)
+                    if requires_auth and self.s.enable_semi_auto_login and attempt == 0:
                         did_login = await self._maybe_prompt_for_login(url)
                         if did_login:
                             # Inject updated session and retry immediately
