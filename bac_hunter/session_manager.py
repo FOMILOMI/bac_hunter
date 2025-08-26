@@ -382,10 +382,16 @@ class SessionManager:
             return False
         if self.has_valid_session(domain_or_url):
             return True
-        ok = self.open_browser_login(domain_or_url)
-        if not ok:
-            return False
-        return self.has_valid_session(domain_or_url)
+        # Block until cookies/tokens are captured
+        while not self.has_valid_session(domain_or_url):
+            ok = self.open_browser_login(domain_or_url)
+            # Continue waiting even if the previous attempt timed out
+            if not ok:
+                try:
+                    print("Waiting for successful login to complete...")
+                except Exception:
+                    pass
+        return True
 
     def prelogin_targets(self, targets: List[str]):
         """Open a browser for each unique domain to let the user log in once per run.
@@ -406,7 +412,14 @@ class SessionManager:
             try:
                 # Only open browser when session missing/expired
                 if not self.has_valid_session(dom):
-                    self.open_browser_login(dom)
+                    # Block until we have a valid session for this domain
+                    while not self.has_valid_session(dom):
+                        ok = self.open_browser_login(dom)
+                        if not ok:
+                            try:
+                                print(f"Still waiting for login on {dom}...")
+                            except Exception:
+                                pass
                 else:
                     try:
                         print(f"Reusing existing session for {dom}")
