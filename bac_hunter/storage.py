@@ -1,6 +1,7 @@
+from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional, Tuple, Dict, Any
 
 
 SCHEMA = """
@@ -52,6 +53,21 @@ CREATE TABLE IF NOT EXISTS comparisons(
   hint TEXT,
   ts DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+-- Extended metadata tables (non-breaking)
+CREATE TABLE IF NOT EXISTS probe_meta(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  probe_id INTEGER,
+  elapsed_ms REAL,
+  headers_json TEXT,
+  FOREIGN KEY(probe_id) REFERENCES probes(id)
+);
+CREATE TABLE IF NOT EXISTS learning(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  scope TEXT,
+  key TEXT,
+  value TEXT,
+  UNIQUE(scope, key)
+);
 """
 
 
@@ -64,6 +80,13 @@ class Storage:
         with self.conn() as c:
             c.executescript(SCHEMA)
             c.executescript(SCHEMA_ACCESS)
+            # Lightweight migrations: add missing columns when upgrading
+            try:
+                # comparisons: ensure columns exist (future-safe no-ops if already present)
+                cols = {row[1] for row in c.execute("PRAGMA table_info(comparisons)")}
+                # no extra columns to add right now; placeholder for future
+            except Exception:
+                pass
 
     @contextmanager
     def conn(self):
@@ -137,6 +160,42 @@ class Storage:
                 (url, identity, status, length, content_type or "", body or b""),
             )
 
+    def save_probe_ext(self, url: str, identity: str, status: int, length: int, content_type: str | None, body: bytes | None, *, elapsed_ms: float | None = None, headers: Dict[str, Any] | None = None) -> int:
+        """Save probe with extended metadata. Returns the probe id."""
+        with self.conn() as c:
+            cur = c.execute(
+                "INSERT INTO probes(url,identity,status,length,content_type,body) VALUES (?,?,?,?,?,?)",
+                (url, identity, status, length, content_type or "", body or b""),
+            )
+            pid = int(cur.lastrowid)
+            try:
+                hdr_json = None
+                if headers is not None:
+                    import json as _json
+                    hdr_json = _json.dumps(headers, ensure_ascii=False)
+                c.execute(
+                    "INSERT INTO probe_meta(probe_id, elapsed_ms, headers_json) VALUES (?,?,?)",
+                    (pid, float(elapsed_ms) if elapsed_ms is not None else None, hdr_json),
+                )
+            except Exception:
+                # If meta insert fails, keep primary row
+                pass
+            return pid
+
+    def save_probe_meta(self, probe_id: int, elapsed_ms: float | None = None, headers: Dict[str, Any] | None = None):
+        with self.conn() as c:
+            try:
+                hdr_json = None
+                if headers is not None:
+                    import json as _json
+                    hdr_json = _json.dumps(headers, ensure_ascii=False)
+                c.execute(
+                    "INSERT INTO probe_meta(probe_id, elapsed_ms, headers_json) VALUES (?,?,?)",
+                    (probe_id, float(elapsed_ms) if elapsed_ms is not None else None, hdr_json),
+                )
+            except Exception:
+                pass
+
     def save_comparison(self, url: str, id_a: str, id_b: str, same_status: bool, same_length_bucket: bool, json_keys_overlap: float, hint: str):
         with self.conn() as c:
             c.execute(
@@ -200,3 +259,17 @@ class Storage:
                 c.execute("VACUUM")
             except Exception:
                 pass
+
+    # Simple key/value memory for behavioral learning
+    def learning_set(self, scope: str, key: str, value: str):
+        with self.conn() as c:
+            c.execute(
+                "INSERT INTO learning(scope,key,value) VALUES (?,?,?) ON CONFLICT(scope,key) DO UPDATE SET value=excluded.value",
+                (scope, key, value),
+            )
+
+    def learning_get(self, scope: str, key: str) -> Optional[str]:
+        with self.conn() as c:
+            cur = c.execute("SELECT value FROM learning WHERE scope=? AND key=?", (scope, key))
+            row = cur.fetchone()
+            return row[0] if row else None

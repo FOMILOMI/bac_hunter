@@ -26,7 +26,8 @@ log = logging.getLogger("access.idor")
 ID_RE = re.compile(r"(?P<id>\b\d{1,10}\b)")
 UUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}\b")
 # Broad hex-like identifier (e.g., Mongo/ObjectId-like or tokens), conservative to avoid noise
-HEXLIKE_RE = re.compile(r"\b[0-9a-fA-F]{8,32}\b")
+HEXLKE_RE_RAW = r"\b[0-9a-fA-F]{8,32}\b"
+HEXLIKE_RE = re.compile(HEXLKE_RE_RAW)
 B64_RE = re.compile(r"\b[A-Za-z0-9_\-]{8,}={0,2}\b")
 
 # Heuristic parameter scoring for IDOR-likelihood
@@ -291,7 +292,8 @@ class IDORProbe:
 	async def test(self, base_url: str, url: str, low_priv: Identity, other_priv: Identity) -> None:
 		base_n = normalize_url(url)
 		r0 = await self.http.get(base_n, headers=low_priv.headers(), context="idor:baseline:low")
-		self.db.save_probe(url=base_n, identity=low_priv.name, status=r0.status_code, length=len(r0.content), content_type=r0.headers.get("content-type"), body=b"")
+		elapsed0 = getattr(r0, 'elapsed', 0.0) if hasattr(r0, 'elapsed') else 0.0
+		self.db.save_probe_ext(url=base_n, identity=low_priv.name, status=r0.status_code, length=len(r0.content), content_type=r0.headers.get("content-type"), body=b"", elapsed_ms=float(elapsed0), headers=dict(r0.headers))
 		if getattr(self.s, 'smart_backoff_enabled', False) and r0.status_code == 429:
 			log.warning("[!] Rate limited (429) on %s, backing off", base_n)
 			await asyncio.sleep(2.0)
@@ -301,21 +303,24 @@ class IDORProbe:
 			"status": r0.status_code,
 			"length": len(r0.content),
 			"content_type": r0.headers.get("content-type", ""),
-			"elapsed_ms": getattr(r0, 'elapsed', 0.0) if hasattr(r0, 'elapsed') else 0.0,
+			"elapsed_ms": float(elapsed0) if elapsed0 else 0.0,
 		}]
 		for v in self.variants(base_url, base_n):
 			rv = await self.http.get(v, headers=low_priv.headers(), context="idor:variant:low")
-			self.db.save_probe(url=v, identity=low_priv.name, status=rv.status_code, length=len(rv.content), content_type=rv.headers.get("content-type"), body=b"")
+			el_v = getattr(rv, 'elapsed', 0.0) if hasattr(rv, 'elapsed') else 0.0
+			self.db.save_probe_ext(url=v, identity=low_priv.name, status=rv.status_code, length=len(rv.content), content_type=rv.headers.get("content-type"), body=b"", elapsed_ms=float(el_v), headers=dict(rv.headers))
 			if getattr(self.s, 'smart_backoff_enabled', False) and rv.status_code == 429:
 				log.warning("[!] Rate limited (429) on %s, backing off", v)
 				await asyncio.sleep(2.0)
 			ro = await self.http.get(v, headers=other_priv.headers(), context="idor:variant:other")
-			self.db.save_probe(url=v, identity=other_priv.name, status=ro.status_code, length=len(ro.content), content_type=ro.headers.get("content-type"), body=b"")
+			el_o = getattr(ro, 'elapsed', 0.0) if hasattr(ro, 'elapsed') else 0.0
+			self.db.save_probe_ext(url=v, identity=other_priv.name, status=ro.status_code, length=len(ro.content), content_type=ro.headers.get("content-type"), body=b"", elapsed_ms=float(el_o), headers=dict(ro.headers))
 			if getattr(self.s, 'smart_backoff_enabled', False) and ro.status_code == 429:
 				log.warning("[!] Rate limited (429) on %s (other), backing off", v)
 				await asyncio.sleep(2.0)
 			diff = self.cmp.compare(r0.status_code, len(r0.content), r0.headers.get("content-type"), None,
-								rv.status_code, len(rv.content), rv.headers.get("content-type"), None)
+							rv.status_code, len(rv.content), rv.headers.get("content-type"), None,
+							r1_headers=dict(r0.headers), r2_headers=dict(rv.headers), r1_elapsed_ms=float(elapsed0 or 0.0), r2_elapsed_ms=float(el_v or 0.0))
 			# persist comparison for later ML/analytics
 			try:
 				self.db.save_comparison(url=v, id_a=low_priv.name, id_b=other_priv.name, same_status=diff.same_status, same_length_bucket=diff.same_length_bucket, json_keys_overlap=diff.json_keys_overlap, hint=diff.hint)
@@ -327,20 +332,15 @@ class IDORProbe:
 				"status": rv.status_code,
 				"length": len(rv.content),
 				"content_type": rv.headers.get("content-type", ""),
-				"elapsed_ms": getattr(rv, 'elapsed', 0.0) if hasattr(rv, 'elapsed') else 0.0,
+				"elapsed_ms": float(el_v) if el_v else 0.0,
 				"prev_status": r0.status_code,
 				"prev_length": len(r0.content),
 			})
-			if rv.status_code in (200, 206) and (not diff.same_status or not diff.same_length_bucket):
+			if rv.status_code in (200, 206) and (not diff.same_status or not diff.same_length_bucket or diff.hint in ("header-diff","cookie-changed","timing-diff")):
 				hint = f"baseline->{rv.status_code} diff={diff.hint} other={ro.status_code}"
 				self.db.add_finding_for_url(v, type_="idor_suspect", evidence=hint, score=0.85 if ro.status_code in (401,403) else 0.75)
 				log.info("IDOR candidate: %s", v)
 		# Behavioral analysis using ML engine
-		try:
-			stats = asyncio.get_event_loop().run_until_complete(self.ml.analyze_response_patterns(resp_rows)) if False else None
-		except Exception:
-			stats = None
-		# Async call in running loop
 		try:
 			stats = await self.ml.analyze_response_patterns(resp_rows)
 			if stats and stats.get("suspicious", 0) > 0 and len(resp_rows) >= 3:
