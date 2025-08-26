@@ -93,33 +93,60 @@ class PlaywrightDriver:
 		self._browser = None
 		self._ctx = None
 		self._page = None
+		self._pl = None
+		try:
+			print("[debug] Starting Playwright...")
+		except Exception:
+			pass
 		try:
 			from playwright.sync_api import sync_playwright  # type: ignore
+			import os
+			import shutil
 			self._pl = sync_playwright().start()
-			# Non-headless so user can interact
-			self._browser = self._pl.chromium.launch(headless=False)
+			# Prefer system-installed Chrome/Chromium without forcing Playwright to install browsers
+			executable_path = None
+			try:
+				executable_path = os.environ.get("BH_CHROME_PATH") or os.environ.get("CHROME_PATH")
+				if not executable_path:
+					for candidate in ("google-chrome-stable", "google-chrome", "chromium-browser", "chromium", "brave-browser"):
+						path = shutil.which(candidate)
+						if path:
+							executable_path = path
+							break
+			except Exception:
+				executable_path = None
+			launch_kwargs = {
+				"headless": False,
+				"args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+			}
+			if executable_path:
+				self._browser = self._pl.chromium.launch(executable_path=executable_path, **launch_kwargs)
+			else:
+				# Try a channel that uses the system browser if available; fall back to default
+				try:
+					self._browser = self._pl.chromium.launch(channel="chrome", **launch_kwargs)
+				except Exception:
+					self._browser = self._pl.chromium.launch(**launch_kwargs)
 			self._ctx = self._browser.new_context()
 			self._page = self._ctx.new_page()
-		except Exception:
-			# Attempt auto-install of Playwright browsers, then retry once (synchronously)
-			self._pl = None
 			try:
-				import subprocess, sys
-				print("[info] Playwright browsers missing; installing chromium (this may take a minute)...")
-				# Block until installation completes
-				res = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
-				# Retry launch after install
-				from playwright.sync_api import sync_playwright  # type: ignore
-				self._pl = sync_playwright().start()
-				self._browser = self._pl.chromium.launch(headless=False)
-				self._ctx = self._browser.new_context()
-				self._page = self._ctx.new_page()
+				print("[debug] Playwright browser launched.")
 			except Exception:
-				self._pl = None
+				pass
+		except Exception:
+			# Do not auto-install. Respect existing environment and fail gracefully.
+			self._pl = None
 
 	def open(self, url: str):
 		if self._page:
-			self._page.goto(url)
+			try:
+				self._page.goto(url)
+				try:
+					print(f"[debug] Browser window open at: {url}")
+				except Exception:
+					pass
+			except Exception:
+				pass
 
 	def wait_for_manual_login(self, timeout_seconds: int = 180) -> bool:
 		if not self._page:
@@ -132,6 +159,10 @@ class PlaywrightDriver:
 			# Guidance to user in console (best effort)
 			try:
 				print("Please complete login in the opened browser window. Waiting for authentication...")
+			except Exception:
+				pass
+			try:
+				print(f"[debug] Waiting up to {int(timeout_seconds)}s for manual login...")
 			except Exception:
 				pass
 			last_url = start_url
@@ -183,6 +214,10 @@ class PlaywrightDriver:
 					token_ok = False
 				# Consider login complete if any of the conditions met
 				if url_ok or token_ok or cookies_ok:
+					try:
+						print("[debug] Login detected; capturing session data...")
+					except Exception:
+						pass
 					return True
 				# Small sleep between polls
 				time.sleep(0.5)
@@ -262,6 +297,10 @@ class PlaywrightDriver:
 
 	def close(self):
 		try:
+			try:
+				print("[debug] Closing Playwright browser...")
+			except Exception:
+				pass
 			if self._ctx:
 				self._ctx.close()
 			if self._browser:
