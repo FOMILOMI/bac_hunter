@@ -49,6 +49,29 @@ class HttpClient:
         # context-aware tested combinations to suppress redundant requests
         # Track per-identity fingerprints to avoid skipping legitimate tests
         self._tested_fingerprints: set[str] = set()
+        # session manager will be provided by orchestrator
+        self._session_mgr = None
+
+    def attach_session_manager(self, session_manager):
+        """Attach session manager after construction to avoid circular imports."""
+        self._session_mgr = session_manager
+        try:
+            # Ensure sessions directory exists
+            self._session_mgr.configure(sessions_dir=self.s.sessions_dir)
+        except Exception:
+            pass
+
+    def _ensure_session_manager(self):
+        if self._session_mgr is None:
+            try:
+                from .session_manager import SessionManager  # lazy import to avoid cycles
+            except Exception:
+                from session_manager import SessionManager
+            try:
+                self._session_mgr = SessionManager()
+                self._session_mgr.configure(sessions_dir=self.s.sessions_dir)
+            except Exception:
+                self._session_mgr = None
 
     async def close(self):
         await self._client.aclose()
@@ -77,6 +100,45 @@ class HttpClient:
         except Exception:
             pass
         return h
+
+    def _inject_domain_session(self, url: str, headers: Dict[str, str]) -> Dict[str, str]:
+        if not self._session_mgr:
+            self._ensure_session_manager()
+        if not self._session_mgr:
+            return headers
+        try:
+            host = host_of(url)
+            domain_headers = self._session_mgr.build_domain_headers(host)
+            # Merge domain session headers while preserving explicit headers
+            out = {**domain_headers, **headers}
+            return out
+        except Exception:
+            return headers
+
+    async def _maybe_prompt_for_login(self, url: str) -> bool:
+        if not self.s.enable_semi_auto_login:
+            return False
+        if not self._session_mgr:
+            self._ensure_session_manager()
+        if not self._session_mgr:
+            return False
+        from .integrations.browser_automation import InteractiveLogin  # lazy import
+        try:
+            base = url
+            # Print clear terminal message
+            try:
+                log.warning(f"[!] Authentication required for {base} - Opening browser, please login manually...")
+            except Exception:
+                pass
+            driver = InteractiveLogin(driver=self.s.browser_driver)
+            cookies, bearer = driver.open_and_wait(base, timeout_seconds=self.s.login_timeout_seconds)
+            if cookies or bearer:
+                host = host_of(url)
+                self._session_mgr.save_domain_session(host, cookies, bearer)
+                return True
+        except Exception:
+            return False
+        return False
 
     def _auth_state_from_headers(self, headers: Dict[str, str]) -> str:
         auth = (headers.get("Authorization") or "").lower()
@@ -154,6 +216,8 @@ class HttpClient:
         async with self._sem:
             # Prepare headers early for fingerprint
             h = self._prepare_headers(headers)
+            # Inject domain session cookies/tokens if available
+            h = self._inject_domain_session(url, h)
             fingerprint = None
             ident = h.get("X-BH-Identity", "unknown")
             if method.upper() == "GET":
@@ -206,7 +270,15 @@ class HttpClient:
                         log.debug("%s %s -> %s", method.upper(), url, r.status_code)
                     ident = h.get("X-BH-Identity", "unknown")
                     self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
-                    # WAF hinting for heavy throttling
+                    # If 401/403, try interactive login and retry once per attempt 0
+                    if r.status_code in (401, 403) and self.s.enable_semi_auto_login and attempt == 0:
+                        did_login = await self._maybe_prompt_for_login(url)
+                        if did_login:
+                            # Inject updated session and retry immediately
+                            h = self._inject_domain_session(url, h)
+                            r = await self._client.request(method, url, headers=h, data=data, json=json)
+                            elapsed_ms = (time.perf_counter() - start) * 1000.0
+                            self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
                     if self._waf is not None:
                         try:
                             body_sample = r.text[:512] if r.headers.get("content-type","" ).lower().startswith("text/") else ""

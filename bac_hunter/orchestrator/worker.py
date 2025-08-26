@@ -45,6 +45,11 @@ class Worker:
         self.db = Storage(settings.db_path)
         self.http = HttpClient(settings)
         self.sm = SessionManager()
+        # Attach session manager to http client for per-domain sessions
+        try:
+            self.http.attach_session_manager(self.sm)
+        except Exception:
+            pass
         self.scope = ScopeGuard(allowed_domains=self.settings.allowed_domains, blocked_patterns=self.settings.blocked_url_patterns)
         self.alerter = AlertManager(settings.generic_webhook, settings.slack_webhook, settings.discord_webhook)
         self._stop = False

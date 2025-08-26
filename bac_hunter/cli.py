@@ -143,6 +143,11 @@ def recon(
     async def run_all():
         http = HttpClient(settings)
         try:
+            # attach session manager for semi-auto login
+            try:
+                http.attach_session_manager(sm)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 plugins = []
@@ -953,6 +958,10 @@ def analyze(
                 typer.echo(f"[warn] failed to load identities yaml: {e}")
         http = HttpClient(settings)
         try:
+            try:
+                http.attach_session_manager(sm)
+            except Exception:
+                pass
             aa = AuthAnalyzer(settings, http, db)
             unauth = sm.get("anon")
             auth = sm.get(auth_name) if auth_name else None

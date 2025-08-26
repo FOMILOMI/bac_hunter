@@ -118,6 +118,15 @@ async def run_scan(target: str = Query(..., description="Target base URL")):
 	settings.targets = [target]
 	http = HttpClient(settings)
 	try:
+		# Attach a temporary session manager so semi-auto login works in web mode
+		try:
+			from ..session_manager import SessionManager
+		except Exception:
+			from session_manager import SessionManager
+		try:
+			http.attach_session_manager(SessionManager())
+		except Exception:
+			pass
 		for base in settings.targets:
 			tid = _db.ensure_target(base)
 			plugins = [RobotsRecon(settings, http, _db), SitemapRecon(settings, http, _db), JSEndpointsRecon(settings, http, _db), SmartEndpointDetector(settings, http, _db)]
