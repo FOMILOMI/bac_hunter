@@ -1,6 +1,40 @@
 from __future__ import annotations
 from typing import Optional
 
+def validate_playwright() -> bool:
+	"""Lightweight validation to ensure Playwright is importable and functional."""
+	try:
+		from playwright.sync_api import sync_playwright  # type: ignore
+		try:
+			print("[debug] Playwright import successful")
+		except Exception:
+			pass
+		with sync_playwright() as p:  # type: ignore
+			try:
+				print(f"[debug] Available devices sample: {list(p.devices.keys())[:5]}")
+			except Exception:
+				pass
+			return True
+	except Exception as e:
+		try:
+			print(f"[ERROR] Playwright validation failed: {e}")
+		except Exception:
+			pass
+		return False
+
+def check_environment() -> bool:
+	"""Emit environment diagnostics helpful for GUI/browser contexts."""
+	try:
+		import os
+		print(f"[debug] DISPLAY: {os.environ.get('DISPLAY', 'Not set')}")
+		print(f"[debug] USER: {os.environ.get('USER', 'Unknown')}")
+		print(f"[debug] HOME: {os.environ.get('HOME', 'Unknown')}")
+		if os.path.exists('/.dockerenv'):
+			print("[warning] Running in Docker container - may need --privileged or display forwarding")
+		return True
+	except Exception:
+		return True
+
 class SeleniumDriver:
 	def __init__(self):
 		try:
@@ -102,7 +136,9 @@ class PlaywrightDriver:
 			from playwright.sync_api import sync_playwright  # type: ignore
 			import os
 			import shutil
+			print("[debug] Importing playwright sync_api...")
 			self._pl = sync_playwright().start()
+			print("[debug] Playwright context started...")
 			# Prefer system-installed Chrome/Chromium without forcing Playwright to install browsers
 			executable_path = None
 			try:
@@ -112,29 +148,40 @@ class PlaywrightDriver:
 						path = shutil.which(candidate)
 						if path:
 							executable_path = path
+							print(f"[debug] Found browser: {path}")
 							break
-			except Exception:
-				executable_path = None
+			except Exception as e:
+				print(f"[debug] Browser detection failed: {e}")
+				# continue without explicit executable
 			launch_kwargs = {
 				"headless": False,
 				"args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
 			}
+			print(f"[debug] Attempting browser launch with executable: {executable_path}")
 			if executable_path:
 				self._browser = self._pl.chromium.launch(executable_path=executable_path, **launch_kwargs)
 			else:
 				# Try a channel that uses the system browser if available; fall back to default
 				try:
 					self._browser = self._pl.chromium.launch(channel="chrome", **launch_kwargs)
-				except Exception:
+				except Exception as e:
+					print(f"[debug] Chrome channel failed: {e}, trying default...")
 					self._browser = self._pl.chromium.launch(**launch_kwargs)
+			print("[debug] Browser launched, creating context...")
 			self._ctx = self._browser.new_context()
+			print("[debug] Context created, creating page...")
 			self._page = self._ctx.new_page()
+			print("[debug] Playwright browser launched successfully.")
+		except ImportError as e:
+			print(f"[ERROR] Playwright import failed: {e}")
+			self._pl = None
+		except Exception as e:
+			print(f"[ERROR] Playwright initialization failed: {e}")
 			try:
-				print("[debug] Playwright browser launched.")
+				import traceback
+				traceback.print_exc()
 			except Exception:
 				pass
-		except Exception:
-			# Do not auto-install. Respect existing environment and fail gracefully.
 			self._pl = None
 
 	def open(self, url: str):
@@ -373,6 +420,17 @@ class InteractiveLogin:
 	def __init__(self, driver: str = "playwright"):
 		self._driver_kind = driver
 		self._drv = None
+		# Environment diagnostics and basic validation
+		try:
+			check_environment()
+		except Exception:
+			pass
+		try:
+			ok = validate_playwright()
+			if not ok:
+				print("[ERROR] Playwright not properly installed or configured")
+		except Exception:
+			pass
 		if driver == "selenium":
 			self._drv = SeleniumDriver()
 		else:
