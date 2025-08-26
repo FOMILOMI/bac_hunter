@@ -167,11 +167,15 @@ class PlaywrightDriver:
 				pass
 			last_url = start_url
 			while time.time() < end_by:
-				# Briefly wait for network to settle each loop
+				# Briefly wait for network to settle each loop (less aggressive timeout)
 				try:
-					self._page.wait_for_load_state("networkidle", timeout=5000)
+					self._page.wait_for_load_state("networkidle", timeout=min(15000, max(1000, int((end_by - time.time()) * 1000))))
 				except Exception:
-					pass
+					# Fall back to DOMContentLoaded if networkidle isn't reached
+					try:
+						self._page.wait_for_load_state("domcontentloaded", timeout=3000)
+					except Exception:
+						pass
 				# Check URL moved away from login-like paths
 				url_now = self._page.url or ""
 				moved = (url_now != last_url)
@@ -216,6 +220,11 @@ class PlaywrightDriver:
 				if url_ok or token_ok or cookies_ok:
 					try:
 						print("[debug] Login detected; capturing session data...")
+					except Exception:
+						pass
+					# Small grace to ensure storage/cookies flush
+					try:
+						self._page.wait_for_timeout(1000)
 					except Exception:
 						pass
 					return True
@@ -329,6 +338,21 @@ class InteractiveLogin:
 			ok = self._drv.wait_for_manual_login(timeout_seconds)  # type: ignore[attr-defined]
 		except Exception:
 			ok = False
-		cookies, bearer, csrf = (self._drv.extract_cookies_and_tokens() if ok else ([], None, None))  # type: ignore[attr-defined]
+		# Attempt to extract regardless of ok; sometimes tokens/cookies exist even if heuristics failed
+		cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+		# If nothing captured and initial wait timed out, give a final grace window
+		if not ok and not cookies and not bearer and not csrf:
+			try:
+				print("Login not detected yet. Keeping browser open for an extra 20s...")
+			except Exception:
+				pass
+			try:
+				self._drv.wait_for_manual_login(20)  # type: ignore[attr-defined]
+			except Exception:
+				pass
+			try:
+				cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+			except Exception:
+				cookies, bearer, csrf = [], None, None
 		self._drv.close()
 		return cookies, bearer, csrf
