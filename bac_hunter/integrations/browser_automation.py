@@ -101,7 +101,19 @@ class PlaywrightDriver:
 			self._ctx = self._browser.new_context()
 			self._page = self._ctx.new_page()
 		except Exception:
+			# Attempt auto-install of Playwright browsers, then retry once
 			self._pl = None
+			try:
+				import subprocess, sys
+				print("[info] Playwright browsers missing; installing chromium...")
+				subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+				from playwright.sync_api import sync_playwright  # type: ignore
+				self._pl = sync_playwright().start()
+				self._browser = self._pl.chromium.launch(headless=False)
+				self._ctx = self._browser.new_context()
+				self._page = self._ctx.new_page()
+			except Exception:
+				self._pl = None
 
 	def open(self, url: str):
 		if self._page:

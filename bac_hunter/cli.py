@@ -573,12 +573,14 @@ def scan(
     settings.max_rps = max_rps
     setup_logging(verbose)
     db = Storage(settings.db_path)
-    sm = SessionManager()
     if identities_yaml:
         try:
+            sm = SessionManager()
             sm.load_yaml(identities_yaml)
         except Exception as e:
             typer.echo(f"[warn] failed to load identities yaml: {e}")
+    else:
+        sm = SessionManager()
     unauth = sm.get("anon")
     auth = sm.get(auth_name) if auth_name else None
 
@@ -586,6 +588,12 @@ def scan(
         http = HttpClient(settings)
         profiler = TargetProfiler(settings, http)
         try:
+            # Attach and pre-login
+            try:
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 prof = await profiler.profile(base, unauth)
@@ -681,6 +689,13 @@ def scan_full(
         http = HttpClient(settings)
         profiler = TargetProfiler(settings, http)
         try:
+            # Attach and pre-login
+            try:
+                sm = SessionManager()
+                http.attach_session_manager(sm)
+                sm.prelogin_targets(settings.targets)
+            except Exception:
+                pass
             for base in settings.targets:
                 tid = db.ensure_target(base)
                 # Phase 1: Recon

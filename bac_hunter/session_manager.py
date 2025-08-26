@@ -407,6 +407,11 @@ class SessionManager:
                 # Only open browser when session missing/expired
                 if not self.has_valid_session(dom):
                     self.open_browser_login(dom)
+                else:
+                    try:
+                        print(f"Reusing existing session for {dom}")
+                    except Exception:
+                        pass
             except Exception:
                 continue
 
@@ -445,6 +450,10 @@ class SessionManager:
                 domain = self._hostname_from_url(target)
                 if domain:
                     self.save_domain_session(domain, cookies, bearer, csrf)
+                    try:
+                        print(f"Session saved for {domain}")
+                    except Exception:
+                        pass
                 return True
         except Exception:
             pass
