@@ -50,6 +50,7 @@ class Worker:
             self.http.attach_session_manager(self.sm)
         except Exception:
             pass
+        # Pre-login is deferred to job execution per target to avoid opening too many browsers here
         self.scope = ScopeGuard(allowed_domains=self.settings.allowed_domains, blocked_patterns=self.settings.blocked_url_patterns)
         self.alerter = AlertManager(settings.generic_webhook, settings.slack_webhook, settings.discord_webhook)
         self._stop = False
@@ -111,6 +112,11 @@ class Worker:
         tid = self.db.ensure_target(target)
         
         if module == 'recon':
+            try:
+                # Ensure interactive login if needed for this target
+                self.sm.prelogin_targets([target])
+            except Exception:
+                pass
             plugins = []
             if opts.get('robots', True): 
                 plugins.append(RobotsRecon(self.settings, self.http, self.db))
@@ -131,6 +137,10 @@ class Worker:
                 await p.run(target, tid)
                 
         elif module == 'access':
+            try:
+                self.sm.prelogin_targets([target])
+            except Exception:
+                pass
             # requires identities to be provided via options.identity_yaml (optional)
             if opts.get('identity_yaml'):
                 try:
@@ -166,6 +176,10 @@ class Worker:
                     log.debug(f"Failed processing {u}: {e}")
                     
         elif module == 'audit':
+            try:
+                self.sm.prelogin_targets([target])
+            except Exception:
+                pass
             if opts.get('identity_yaml'):
                 try:
                     self.sm.load_yaml(opts['identity_yaml'])
@@ -184,6 +198,10 @@ class Worker:
             if opts.get('do_toggles', True):
                 await pt.run(urls, ident)
         elif module == 'exploit':
+            try:
+                self.sm.prelogin_targets([target])
+            except Exception:
+                pass
             if opts.get('identity_yaml'):
                 try:
                     self.sm.load_yaml(opts['identity_yaml'])

@@ -124,7 +124,10 @@ async def run_scan(target: str = Query(..., description="Target base URL")):
 		except Exception:
 			from session_manager import SessionManager
 		try:
-			http.attach_session_manager(SessionManager())
+			_sm = SessionManager()
+			http.attach_session_manager(_sm)
+			# Pre-login for the provided target (opens browser if missing/expired)
+			_sm.prelogin_targets(settings.targets)
 		except Exception:
 			pass
 		for base in settings.targets:

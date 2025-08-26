@@ -7,7 +7,8 @@ class SeleniumDriver:
 			from selenium import webdriver  # type: ignore
 			from selenium.webdriver.chrome.options import Options  # type: ignore
 			opts = Options()
-			opts.add_argument("--headless=new")
+			# Non-headless to allow manual login
+			# opts.add_argument("--headless=new")
 			opts.add_argument("--no-sandbox")
 			opts.add_argument("--disable-gpu")
 			self._driver = webdriver.Chrome(options=opts)
@@ -17,6 +18,70 @@ class SeleniumDriver:
 	def open(self, url: str):
 		if self._driver:
 			self._driver.get(url)
+
+	def wait_for_manual_login(self, timeout_seconds: int = 180) -> bool:
+		if not self._driver:
+			return False
+		try:
+			from selenium.webdriver.support.ui import WebDriverWait  # type: ignore
+			from selenium.webdriver.support import expected_conditions as EC  # type: ignore
+			from selenium.webdriver.common.by import By  # type: ignore
+			# Heuristic: wait for any cookie to be set or URL to change away from login-like paths
+			login_like = ["login", "signin", "auth", "session"]
+			start_url = self._driver.current_url
+			WebDriverWait(self._driver, timeout_seconds).until(
+				lambda d: (d.get_cookies() and len(d.get_cookies()) > 0) or (d.current_url != start_url and not any(x in d.current_url.lower() for x in login_like))
+			)
+			return True
+		except Exception:
+			return False
+
+	def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None]:
+		cookies: list = []
+		bearer: str | None = None
+		csrf: str | None = None
+		try:
+			if self._driver:
+				cookies = self._driver.get_cookies() or []
+				# Try to read tokens from localStorage/sessionStorage via JS
+				js = """
+				(() => {
+				  const keys = Object.keys(localStorage || {});
+				  let token = null;
+				  for (const k of keys) {
+				    const v = localStorage.getItem(k) || '';
+				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) { token = v; break; }
+				  }
+				  if (!token) {
+				    const sk = Object.keys(sessionStorage || {});
+				    for (const k of sk) {
+				      const v = sessionStorage.getItem(k) || '';
+				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) { token = v; break; }
+				    }
+				  }
+				  let csrf = null;
+				  const metas = Array.from(document.querySelectorAll('meta[name]'));
+				  for (const m of metas) {
+				    const name = (m.getAttribute('name') || '').toLowerCase();
+				    if (name.includes('csrf')) { csrf = m.getAttribute('content') || null; if (csrf) break; }
+				  }
+				  if (!csrf) {
+				    const inputs = Array.from(document.querySelectorAll('input[type="hidden"][name]'));
+				    for (const inp of inputs) {
+				      const nm = (inp.getAttribute('name') || '').toLowerCase();
+				      if (nm === 'csrf' || nm === '_csrf' || nm === 'csrf_token') { csrf = inp.getAttribute('value') || null; if (csrf) break; }
+				    }
+				  }
+				  return { token, csrf };
+				})()
+				"""
+				maybe = self._driver.execute_script(js)
+				if maybe and isinstance(maybe, dict):
+					bearer = (maybe.get('token') or None)
+					csrf = (maybe.get('csrf') or None)
+		except Exception:
+			pass
+		return cookies, bearer, csrf
 
 	def close(self):
 		if self._driver:
