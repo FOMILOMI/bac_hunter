@@ -508,15 +508,28 @@ class SessionManager:
                     target = f"https://{domain_or_url}"
             except Exception:
                 target = domain_or_url
-            from .integrations.browser_automation import InteractiveLogin  # type: ignore
-        except Exception:
             try:
-                from integrations.browser_automation import InteractiveLogin  # type: ignore
+                from .integrations.browser_automation import InteractiveLogin  # type: ignore
             except Exception:
-                return False
+                from integrations.browser_automation import InteractiveLogin  # type: ignore
+        except Exception:
+            return False
         try:
             drv = InteractiveLogin(driver=self._browser_driver)
-            cookies, bearer, csrf = drv.open_and_wait(target, timeout_seconds=self._login_timeout_seconds)
+
+            import asyncio
+            # Run async method in sync context with proper loop handling
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an async context. Offload to a separate thread to run its own loop.
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, drv.open_and_wait(target, self._login_timeout_seconds))
+                    cookies, bearer, csrf = future.result()
+            except RuntimeError:
+                # No running loop, safe to use asyncio.run directly
+                cookies, bearer, csrf = asyncio.run(drv.open_and_wait(target, self._login_timeout_seconds))
+
             # Persist if anything was captured
             if cookies or bearer or csrf:
                 domain = self._hostname_from_url(target)
