@@ -93,7 +93,6 @@ except Exception:
 		QuantumReadySecurityAnalyzer,
 		AdvancedIntelligenceReporting,
 	)
-import uvicorn
 import json
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
@@ -1003,6 +1002,11 @@ def dashboard(
     reload: bool = typer.Option(False, help="Auto-reload on code changes"),
 ):
     if dashboard_app:
+        try:
+            import uvicorn  # type: ignore
+        except Exception:
+            typer.echo("[warn] uvicorn not installed. Install with 'pip install bac-hunter[web]'.")
+            return
         uvicorn.run(dashboard_app, host=host, port=port, reload=reload)
     else:
         typer.echo("[warn] Dashboard app not available. Skipping dashboard start.")
