@@ -64,7 +64,26 @@ except Exception:
         IntelligentTargetProfiler,
         InteractiveGuidanceSystem,
     )
+try:
+	from .intelligence.ai import (
+		BAC_ML_Engine,
+		NovelVulnDetector,
+		AdvancedEvasionEngine,
+		BusinessContextAI,
+		QuantumReadySecurityAnalyzer,
+		AdvancedIntelligenceReporting,
+	)
+except Exception:
+	from intelligence.ai import (
+		BAC_ML_Engine,
+		NovelVulnDetector,
+		AdvancedEvasionEngine,
+		BusinessContextAI,
+		QuantumReadySecurityAnalyzer,
+		AdvancedIntelligenceReporting,
+	)
 import uvicorn
+import json
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
 
@@ -1367,3 +1386,70 @@ def ci(
         typer.echo(f"[fail] High risk finding detected: score={worst:.2f} >= {fail_threshold:.2f}")
         raise typer.Exit(3)
     typer.echo("[ok] No findings above threshold")
+
+
+@app.command(help="AI: predict likely vulnerable endpoints using ML/heuristics")
+def ai_predict(
+	target: List[str] = typer.Argument(..., help="Target base URLs"),
+	verbose: int = typer.Option(1, "-v"),
+):
+	settings = Settings()
+	settings.targets = target
+	setup_logging(verbose)
+	db = Storage(settings.db_path)
+	engine = BAC_ML_Engine(settings, db)
+	async def run():
+		profile = {"kind": "api"}
+		res = await engine.predict_vulnerable_endpoints(profile, [])
+		for url, score in res[:50]:
+			typer.echo(f"{score:.2f}\t{url}")
+	asyncio.run(run())
+
+
+@app.command(help="AI: zero-day discovery - fuzzy/anomaly candidates")
+def ai_zeroday(
+	target: List[str] = typer.Argument(...),
+	verbose: int = typer.Option(1, "-v"),
+):
+	settings = Settings()
+	settings.targets = target
+	setup_logging(verbose)
+	db = Storage(settings.db_path)
+	det = NovelVulnDetector(settings, db)
+	async def run():
+		endpoints = []
+		for tid, base in db.iter_all_targets():
+			endpoints.extend(list(db.iter_target_urls(tid)))
+		plans = await det.fuzzy_logic_testing(endpoints)
+		for p in plans[:100]:
+			typer.echo(f"{p.get('test')}\t{p.get('url')}")
+	asyncio.run(run())
+
+
+@app.command(help="AI: evasion strategy synthesis")
+def ai_evasion(
+	target: str = typer.Argument(...),
+	verbose: int = typer.Option(1, "-v"),
+):
+	settings = Settings()
+	setup_logging(verbose)
+	engine = AdvancedEvasionEngine(settings)
+	async def run():
+		strategy = await engine.adaptive_waf_evasion(target, None)
+		typer.echo(str(strategy))
+	asyncio.run(run())
+
+
+@app.command(help="AI: executive risk briefing (mock)")
+def ai_brief(
+	verbose: int = typer.Option(1, "-v"),
+):
+	settings = Settings()
+	setup_logging(verbose)
+	db = Storage(settings.db_path)
+	reporter = AdvancedIntelligenceReporting()
+	async def run():
+		findings = [{"type": t, "url": u, "score": s} for _, t, u, _, s in db.iter_findings()]
+		brief = await reporter.executive_risk_briefing(findings, {})
+		typer.echo(json.dumps(brief, indent=2))
+	asyncio.run(run())
