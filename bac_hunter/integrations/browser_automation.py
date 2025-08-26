@@ -1,26 +1,26 @@
 from __future__ import annotations
 from typing import Optional
 
+
 def validate_playwright() -> bool:
-	"""Lightweight validation to ensure Playwright is importable and functional."""
+	"""Lightweight validation to ensure Playwright is importable and functional.
+
+	Uses async API import only to avoid sync API within running event loops.
+	"""
 	try:
-		from playwright.sync_api import sync_playwright  # type: ignore
+		from playwright import async_api  # type: ignore  # noqa: F401
 		try:
-			print("[debug] Playwright import successful")
+			print("[debug] Playwright async_api import successful")
 		except Exception:
 			pass
-		with sync_playwright() as p:  # type: ignore
-			try:
-				print(f"[debug] Available devices sample: {list(p.devices.keys())[:5]}")
-			except Exception:
-				pass
-			return True
+		return True
 	except Exception as e:
 		try:
 			print(f"[ERROR] Playwright validation failed: {e}")
 		except Exception:
 			pass
 		return False
+
 
 def check_environment() -> bool:
 	"""Emit environment diagnostics helpful for GUI/browser contexts."""
@@ -34,6 +34,7 @@ def check_environment() -> bool:
 		return True
 	except Exception:
 		return True
+
 
 class SeleniumDriver:
 	def __init__(self):
@@ -58,8 +59,6 @@ class SeleniumDriver:
 			return False
 		try:
 			from selenium.webdriver.support.ui import WebDriverWait  # type: ignore
-			from selenium.webdriver.support import expected_conditions as EC  # type: ignore
-			from selenium.webdriver.common.by import By  # type: ignore
 			# Heuristic: wait for any cookie to be set or URL to change away from login-like paths
 			login_like = ["login", "signin", "auth", "session"]
 			start_url = self._driver.current_url
@@ -127,24 +126,24 @@ class PlaywrightDriver:
 		self._browser = None
 		self._ctx = None
 		self._page = None
-		self._pl = None
+		self._playwright = None
+
+	async def initialize(self) -> bool:
+		"""Async initialization method"""
 		try:
-			print("[debug] Starting Playwright...")
-		except Exception:
-			pass
-		try:
-			from playwright.sync_api import sync_playwright  # type: ignore
-			import os
-			import shutil
-			print("[debug] Importing playwright sync_api...")
-			self._pl = sync_playwright().start()
+			print("[debug] Starting Playwright (async)...")
+			from playwright.async_api import async_playwright  # type: ignore
+			import os, shutil
+
+			self._playwright = await async_playwright().start()
 			print("[debug] Playwright context started...")
-			# Prefer system-installed Chrome/Chromium without forcing Playwright to install browsers
+
+			# Browser detection
 			executable_path = None
 			try:
 				executable_path = os.environ.get("BH_CHROME_PATH") or os.environ.get("CHROME_PATH")
 				if not executable_path:
-					for candidate in ("google-chrome-stable", "google-chrome", "chromium-browser", "chromium", "brave-browser"):
+					for candidate in ("google-chrome-stable", "google-chrome", "chromium-browser", "chromium"):
 						path = shutil.which(candidate)
 						if path:
 							executable_path = path
@@ -152,268 +151,244 @@ class PlaywrightDriver:
 							break
 			except Exception as e:
 				print(f"[debug] Browser detection failed: {e}")
-				# continue without explicit executable
+
 			launch_kwargs = {
 				"headless": False,
-				"args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+				"args": ["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"],
 			}
-			print(f"[debug] Attempting browser launch with executable: {executable_path}")
-			if executable_path:
-				self._browser = self._pl.chromium.launch(executable_path=executable_path, **launch_kwargs)
-			else:
-				# Try a channel that uses the system browser if available; fall back to default
-				try:
-					self._browser = self._pl.chromium.launch(channel="chrome", **launch_kwargs)
-				except Exception as e:
-					print(f"[debug] Chrome channel failed: {e}, trying default...")
-					self._browser = self._pl.chromium.launch(**launch_kwargs)
-			print("[debug] Browser launched, creating context...")
-			self._ctx = self._browser.new_context()
-			print("[debug] Context created, creating page...")
-			self._page = self._ctx.new_page()
-			print("[debug] Playwright browser launched successfully.")
-		except ImportError as e:
-			print(f"[ERROR] Playwright import failed: {e}")
-			self._pl = None
-		except Exception as e:
-			print(f"[ERROR] Playwright initialization failed: {e}")
-			try:
-				import traceback
-				traceback.print_exc()
-			except Exception:
-				pass
-			self._pl = None
 
-	def open(self, url: str):
+			print(f"[debug] Launching browser with: {executable_path or 'default'}")
+
+			if executable_path:
+				self._browser = await self._playwright.chromium.launch(
+					executable_path=executable_path, **launch_kwargs
+				)
+			else:
+				try:
+					self._browser = await self._playwright.chromium.launch(channel="chrome", **launch_kwargs)
+				except Exception:
+					self._browser = await self._playwright.chromium.launch(**launch_kwargs)
+
+			print("[debug] Browser launched, creating context...")
+			self._ctx = await self._browser.new_context()
+
+			print("[debug] Context created, creating page...")
+			self._page = await self._ctx.new_page()
+
+			print("[debug] Playwright browser launched successfully.")
+			return True
+
+		except Exception as e:
+			print(f"[ERROR] Async Playwright initialization failed: {e}")
+			import traceback
+			traceback.print_exc()
+			return False
+
+	async def open(self, url: str):
 		if self._page:
 			try:
-				self._page.goto(url)
-				try:
-					print(f"[debug] Browser window open at: {url}")
-				except Exception:
-					pass
-			except Exception:
-				pass
+				await self._page.goto(url)
+				print(f"[debug] Browser window open at: {url}")
+			except Exception as e:
+				print(f"[ERROR] Failed to navigate to {url}: {e}")
 
-	def wait_for_manual_login(self, timeout_seconds: int = 180) -> bool:
+	async def wait_for_manual_login(self, timeout_seconds: int = 180) -> bool:
 		if not self._page:
 			return False
-		import time, re
+
+		import asyncio, re
 		login_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.I)
-		start_url = ""
+
 		try:
 			start_url = self._page.url
 		except Exception:
 			start_url = ""
-		end_by = time.time() + max(5, int(timeout_seconds))
-		# One-time guidance for the user
-		try:
-			print(f"[browser] Please complete login - you have {int(timeout_seconds)} seconds...")
-		except Exception:
-			pass
-		# Inject lightweight on-page banner with countdown (best effort)
-		self._inject_browser_guidance(int(timeout_seconds))
-		last_report = 0
-		last_url = start_url
-		while True:
-			now = time.time()
-			if now >= end_by:
-				return False
-			remaining = int(end_by - now)
-			# Periodic progress message
-			if remaining // 10 != last_report // 10:
-				try:
-					print(f"[waiting] Monitoring for authentication... {remaining}s remaining")
-				except Exception:
-					pass
-				last_report = remaining
-			# Soft settle without hard timeouts
-			try:
-				self._page.wait_for_load_state("domcontentloaded", timeout=2000)
-			except Exception:
-				pass
-			# URL-based heuristic
-			url_now = ""
-			try:
-				url_now = self._page.url or ""
-			except Exception:
-				url_now = ""
-			path = url_now
-			try:
-				from urllib.parse import urlparse as _u
-				path = _u(url_now).path or url_now
-			except Exception:
-				path = url_now
-			url_ok = bool(url_now) and (url_now != start_url) and (login_re.search(path or "") is None)
-			# Cookie heuristic
-			cookies_ok = False
-			try:
-				if self._ctx:
-					cookies_ok = bool(self._ctx.cookies())
-			except Exception:
-				cookies_ok = False
-			# Storage token heuristic
-			token_ok = False
-			try:
-				js = r"""
-				(() => {
-				  const keys = Object.keys(localStorage || {});
-				  for (const k of keys) {
-				    const v = localStorage.getItem(k) || '';
-				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
-				  }
-				  const sk = Object.keys(sessionStorage || {});
-				  for (const k of sk) {
-				    const v = sessionStorage.getItem(k) || '';
-				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
-				  }
-				  return false;
-				})()
-				"""
-				token_ok = bool(self._page.evaluate(js))
-			except Exception:
-				token_ok = False
-			if url_ok or token_ok or cookies_ok:
-				try:
-					print("[success] Login detected! Capturing session data...")
-				except Exception:
-					pass
-				try:
-					self._page.wait_for_timeout(1000)
-				except Exception:
-					pass
-				return True
-			try:
-				time.sleep(0.5)
-			except Exception:
-				pass
 
-	def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None]:
+		print(f"[browser] Please complete login - you have {timeout_seconds} seconds...")
+		await self._inject_browser_guidance(timeout_seconds)
+
+		deadline = asyncio.get_event_loop().time() + timeout_seconds
+		last_report = 0
+
+		while True:
+			now = asyncio.get_event_loop().time()
+			if now >= deadline:
+				return False
+
+			remaining = int(deadline - now)
+
+			# Progress reporting
+			if remaining // 10 != last_report // 10:
+				print(f"[waiting] Monitoring for authentication... {remaining}s remaining")
+				last_report = remaining
+
+			# Check login completion
+			try:
+				# URL check
+				url_now = self._page.url or ""
+				path = url_now
+				try:
+					from urllib.parse import urlparse
+					path = urlparse(url_now).path or url_now
+				except Exception:
+					pass
+
+				url_ok = bool(url_now) and (url_now != start_url) and (login_re.search(path) is None)
+
+				# Cookies check
+				cookies_ok = False
+				if self._ctx:
+					cookies = await self._ctx.cookies()
+					cookies_ok = bool(cookies)
+
+				# Token check
+				token_ok = False
+				try:
+					js = r"""
+					(() => {
+						const keys = Object.keys(localStorage || {});
+						for (const k of keys) {
+							const v = localStorage.getItem(k) || '';
+							if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
+						}
+						const sk = Object.keys(sessionStorage || {});
+						for (const k of sk) {
+							const v = sessionStorage.getItem(k) || '';
+							if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
+						}
+						return false;
+					})()
+					"""
+					token_ok = await self._page.evaluate(js)
+				except Exception:
+					pass
+
+				if url_ok or token_ok or cookies_ok:
+					print("[success] Login detected! Capturing session data...")
+					await asyncio.sleep(1)  # Grace period
+					return True
+
+			except Exception as e:
+				print(f"[debug] Login check error: {e}")
+
+			await asyncio.sleep(0.5)
+
+	async def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None]:
 		cookies: list = []
 		bearer: str | None = None
 		csrf: str | None = None
+
 		try:
 			if self._ctx:
-				cookies = self._ctx.cookies()
+				cookies = await self._ctx.cookies()
+
 			if self._page:
-				# Try to extract typical bearer tokens from localStorage/sessionStorage
+				# Extract bearer token
 				js = r"""
 				(() => {
-				  const keys = Object.keys(localStorage || {});
-				  const vals = keys.map(k => localStorage.getItem(k));
-				  const joined = (vals.join(' ') || '').toLowerCase();
-				  let token = null;
-				  for (const k of keys) {
-				    const v = localStorage.getItem(k) || '';
-				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) {
-				      token = v;
-				      break;
-				    }
-				  }
-				  if (!token) {
-				    const sk = Object.keys(sessionStorage || {});
-				    for (const k of sk) {
-				      const v = sessionStorage.getItem(k) || '';
-				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) {
-				        token = v;
-				        break;
-				      }
-				    }
-				  }
-				  return token;
+					const keys = Object.keys(localStorage || {});
+					for (const k of keys) {
+						const v = localStorage.getItem(k) || '';
+						if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) {
+							return v;
+						}
+					}
+					const sk = Object.keys(sessionStorage || {});
+					for (const k of sk) {
+						const v = sessionStorage.getItem(k) || '';
+						if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) {
+							return v;
+						}
+					}
+					return null;
 				})()
 				"""
-				maybe = self._page.evaluate(js)
-				if maybe and isinstance(maybe, str):
-					bearer = maybe.strip()
-				# Extract CSRF tokens from meta or hidden inputs
+				maybe_bearer = await self._page.evaluate(js)
+				if maybe_bearer:
+					bearer = str(maybe_bearer).strip()
+
+				# Extract CSRF token
 				csrf_js = r"""
 				(() => {
-				  let token = null;
-				  const metas = Array.from(document.querySelectorAll('meta[name]'));
-				  for (const m of metas) {
-				    const name = (m.getAttribute('name') || '').toLowerCase();
-				    if (name.includes('csrf')) {
-				      token = m.getAttribute('content') || null;
-				      if (token) break;
-				    }
-				  }
-				  if (!token) {
-				    const inputs = Array.from(document.querySelectorAll('input[type="hidden"][name]'));
-				    for (const inp of inputs) {
-				      const nm = (inp.getAttribute('name') || '').toLowerCase();
-				      if (nm === 'csrf' || nm === '_csrf' || nm === 'csrf_token') {
-				        token = inp.getAttribute('value') || null;
-				        if (token) break;
-				      }
-				    }
-				  }
-				  return token;
+					const metas = Array.from(document.querySelectorAll('meta[name]'));
+					for (const m of metas) {
+						const name = (m.getAttribute('name') || '').toLowerCase();
+						if (name.includes('csrf')) {
+							return m.getAttribute('content');
+						}
+					}
+					const inputs = Array.from(document.querySelectorAll('input[type="hidden"][name]'));
+					for (const inp of inputs) {
+						const nm = (inp.getAttribute('name') || '').toLowerCase();
+						if (nm === 'csrf' || nm === '_csrf' || nm === 'csrf_token') {
+							return inp.getAttribute('value');
+						}
+					}
+					return null;
 				})()
 				"""
-				maybe_csrf = self._page.evaluate(csrf_js)
-				if maybe_csrf and isinstance(maybe_csrf, str):
-					csrf = maybe_csrf.strip()
-		except Exception:
-			pass
+				maybe_csrf = await self._page.evaluate(csrf_js)
+				if maybe_csrf:
+					csrf = str(maybe_csrf).strip()
+
+		except Exception as e:
+			print(f"[debug] Token extraction error: {e}")
+
 		return cookies, bearer, csrf
 
-	def _inject_browser_guidance(self, total_seconds: int):
-		# Best-effort UI overlay inside the page; failures are ignored
+	async def _inject_browser_guidance(self, total_seconds: int):
 		try:
 			if not self._page:
 				return
-			js = f"""
-			(() => {{
-			  try {{
-			    if (window.__BH_GUIDE__) return;
-			    const banner = document.createElement('div');
-			    banner.id = '__bh_login_banner__';
-			    banner.style.position = 'fixed';
-			    banner.style.zIndex = '2147483647';
-			    banner.style.left = '0';
-			    banner.style.right = '0';
-			    banner.style.bottom = '0';
-			    banner.style.padding = '10px 14px';
-			    banner.style.background = 'rgba(20,20,20,0.85)';
-			    banner.style.color = '#fff';
-			    banner.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
-			    banner.style.fontSize = '14px';
-			    banner.style.textAlign = 'center';
-			    banner.style.pointerEvents = 'auto';
-			    let remain = {int(total_seconds)};
-			    banner.textContent = `Please complete login here. Time remaining: ${'{'}remain{'}'}s`;
-			    document.body.appendChild(banner);
-			    window.__BH_GUIDE__ = true;
-			    window.__BH_EXT_TIMER__ = setInterval(() => {{
-			      try {{
-			        remain = Math.max(0, remain - 1);
-			        const el = document.getElementById('__bh_login_banner__');
-			        if (el) el.textContent = `Please complete login here. Time remaining: ${'{'}remain{'}'}s`;
-			        if (remain <= 0) {{ clearInterval(window.__BH_EXT_TIMER__); }}
-			      }} catch {{}}
-			    }}, 1000);
-			  }} catch {{}}
-			}})()
+
+			js = """
+			(() => {
+				try {
+					if (window.__BH_GUIDE__) return;
+					const banner = document.createElement('div');
+					banner.id = '__bh_login_banner__';
+					banner.style.cssText = `
+						position: fixed;
+						z-index: 2147483647;
+						left: 0;
+						right: 0;
+						bottom: 0;
+						padding: 12px 16px;
+						background: rgba(20,20,20,0.9);
+						color: #fff;
+						font-family: system-ui, sans-serif;
+						font-size: 14px;
+						text-align: center;
+						border-top: 2px solid #4CAF50;
+					`;
+					let remain = TOTAL_SECONDS_PLACEHOLDER;
+					banner.textContent = `🔐 BAC-HUNTER: Please complete login here. Time remaining: ${remain}s`;
+					document.body.appendChild(banner);
+					window.__BH_GUIDE__ = true;
+					window.__BH_TIMER__ = setInterval(() => {
+						remain = Math.max(0, remain - 1);
+						const el = document.getElementById('__bh_login_banner__');
+						if (el) el.textContent = `🔐 BAC-HUNTER: Please complete login here. Time remaining: ${remain}s`;
+						if (remain <= 0) clearInterval(window.__BH_TIMER__);
+					}, 1000);
+				} catch(e) { console.log('Banner injection failed:', e); }
+			})()
 			"""
-			self._page.evaluate(js)
+			await self._page.evaluate(js.replace("TOTAL_SECONDS_PLACEHOLDER", str(int(total_seconds))))
 		except Exception:
 			pass
 
-	def close(self):
+	async def close(self):
 		try:
-			try:
-				print("[debug] Closing Playwright browser...")
-			except Exception:
-				pass
+			print("[debug] Closing Playwright browser...")
 			if self._ctx:
-				self._ctx.close()
+				await self._ctx.close()
 			if self._browser:
-				self._browser.close()
-			if self._pl:
-				self._pl.stop()
-		except Exception:
-			pass
+				await self._browser.close()
+			if self._playwright:
+				await self._playwright.stop()
+		except Exception as e:
+			print(f"[debug] Browser cleanup error: {e}")
 
 
 class InteractiveLogin:
@@ -436,16 +411,49 @@ class InteractiveLogin:
 		else:
 			self._drv = PlaywrightDriver()
 
-	def open_and_wait(self, url: str, timeout_seconds: int = 180) -> tuple[list, str | None, str | None]:
+	async def open_and_wait(self, url: str, timeout_seconds: int = 180) -> tuple[list, str | None, str | None]:
 		if not self._drv:
 			return [], None, None
-		self._drv.open(url)
-		ok = False
+
+		# Selenium path remains synchronous; run in worker thread to avoid blocking loop
+		if self._driver_kind == "selenium":
+			import asyncio
+
+			def run_sync():
+				try:
+					self._drv.open(url)
+					try:
+						self._drv.wait_for_manual_login(timeout_seconds)  # type: ignore[attr-defined]
+					except Exception:
+						pass
+					cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+					self._drv.close()
+					return cookies, bearer, csrf
+				except Exception:
+					try:
+						self._drv.close()
+					except Exception:
+						pass
+					return [], None, None
+
+			return await asyncio.to_thread(run_sync)
+
+		# Playwright async path
 		try:
-			ok = self._drv.wait_for_manual_login(timeout_seconds)  # type: ignore[attr-defined]
+			ok = await self._drv.initialize()  # type: ignore[attr-defined]
+			if not ok:
+				return [], None, None
+			await self._drv.open(url)  # type: ignore[attr-defined]
+			try:
+				await self._drv.wait_for_manual_login(timeout_seconds)  # type: ignore[attr-defined]
+			except Exception:
+				pass
+			cookies, bearer, csrf = await self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+			await self._drv.close()  # type: ignore[attr-defined]
+			return cookies, bearer, csrf
 		except Exception:
-			ok = False
-		# Attempt to extract regardless of ok; sometimes tokens/cookies exist even if heuristics failed
-		cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
-		self._drv.close()
-		return cookies, bearer, csrf
+			try:
+				await self._drv.close()  # type: ignore[attr-defined]
+			except Exception:
+				pass
+			return [], None, None
