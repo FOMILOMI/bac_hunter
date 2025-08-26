@@ -68,6 +68,8 @@ class Settings:
     # User-Agent rotation / request randomization
     enable_ua_rotation: bool = _env("BH_UA_ROTATE", "true").lower() == "true"
     ua_rotate_per_request: bool = _env("BH_UA_ROTATE_PER_REQ", "false").lower() == "true"
+    enable_request_randomization: bool = _env("BH_REQ_RANDOMIZE", "false").lower() == "true"
+    enable_encoding_bypass: bool = _env("BH_ENCODING_BYPASS", "false").lower() == "true"
 
     # Caching (in-memory, GET only)
     cache_enabled: bool = _env("BH_CACHE", "true").lower() == "true"

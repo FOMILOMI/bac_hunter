@@ -16,6 +16,7 @@ try:
     from .storage import Storage
     from .session_manager import SessionManager
     from .plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector, AuthDiscoveryRecon
+    from .plugins import GraphQLTester
     from .access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
     from .audit import HeaderInspector, ParamToggle
     from .reporting import Exporter
@@ -34,13 +35,14 @@ except Exception:  # fallback when executed as a top-level module
     from storage import Storage
     from session_manager import SessionManager
     from plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, SmartEndpointDetector, AuthDiscoveryRecon
+    from plugins import GraphQLTester
     from access import DifferentialTester, IDORProbe, ForceBrowser, ResponseComparator, HARReplayAnalyzer, RequestMutator
     from audit import HeaderInspector, ParamToggle
     from reporting import Exporter
     from orchestrator import JobStore, Worker
     from integrations import SubfinderWrapper, PDHttpxWrapper
     from exploitation.privilege_escalation import PrivilegeEscalationTester
-    from advanced.parameter_miner import ParameterMiner
+    from advanced import ParameterMiner
     from fallback import PathScanner, ParamScanner
     from profiling import TargetProfiler
     from webapp import app as dashboard_app
@@ -114,6 +116,7 @@ def recon(
     obey_robots: bool = typer.Option(True, help="Respect robots.txt when crawling clickable paths"),
     max_rps: float = typer.Option(3.0, help="Global requests per second cap"),
     per_host_rps: float = typer.Option(1.5, help="Per-host requests per second cap"),
+    graphql_test: bool = typer.Option(True, help="Run GraphQL testing module if GraphQL endpoints likely"),
 ):
     """Run respectful recon (robots/sitemap/js endpoints) and store results in SQLite."""
 
@@ -146,6 +149,9 @@ def recon(
                 plugins.append(SmartEndpointDetector(settings, http, db))
                 # Auth discovery
                 plugins.append(AuthDiscoveryRecon(settings, http, db))
+                # Optional GraphQL testing
+                if graphql_test:
+                    plugins.append(GraphQLTester(settings, http, db))
 
                 for p in plugins:
                     try:

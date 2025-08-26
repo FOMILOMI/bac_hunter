@@ -11,6 +11,7 @@ try:
 	from ..storage import Storage
 	from ..session_manager import SessionManager
 	from ..plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, GraphQLRecon
+	from ..plugins import SmartEndpointDetector, AuthDiscoveryRecon, GraphQLTester
 	from ..access import IDORProbe, DifferentialTester, ForceBrowser
 	from ..audit import HeaderInspector, ParamToggle
 	from ..exploitation.privilege_escalation import PrivilegeEscalationTester
@@ -25,6 +26,7 @@ except Exception:
 	from storage import Storage
 	from session_manager import SessionManager
 	from plugins import RobotsRecon, SitemapRecon, JSEndpointsRecon, GraphQLRecon
+	from plugins import SmartEndpointDetector, AuthDiscoveryRecon, GraphQLTester
 	from access import IDORProbe, DifferentialTester, ForceBrowser
 	from audit import HeaderInspector, ParamToggle
 	from exploitation.privilege_escalation import PrivilegeEscalationTester
@@ -113,6 +115,12 @@ class Worker:
                 plugins.append(JSEndpointsRecon(self.settings, self.http, self.db))
             if opts.get('graphql', True):
                 plugins.append(GraphQLRecon(self.settings, self.http, self.db))
+            # New GraphQL testing (optional)
+            if opts.get('graphql_test', True):
+                plugins.append(GraphQLTester(self.settings, self.http, self.db))
+            # Smart endpoint detection and auth discovery remain
+            plugins.append(SmartEndpointDetector(self.settings, self.http, self.db))
+            plugins.append(AuthDiscoveryRecon(self.settings, self.http, self.db))
             
             for p in plugins:
                 await p.run(target, tid)
