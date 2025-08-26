@@ -55,6 +55,12 @@ class SessionManager:
             self._login_timeout_seconds = int(login_timeout_seconds)
         if enable_semi_auto_login is not None:
             self._enable_semi_auto_login = bool(enable_semi_auto_login)
+        # CI/offline guard: disable interactive login when BH_OFFLINE=1
+        try:
+            if (os.getenv("BH_OFFLINE", "0") == "1"):
+                self._enable_semi_auto_login = False
+        except Exception:
+            pass
 
     def _session_path(self, domain: str) -> Optional[str]:
         if not self._sessions_dir:
@@ -378,6 +384,7 @@ class SessionManager:
         """Ensure user has logged in for the given domain. Triggers browser if needed.
         Returns True if a valid session exists after this call.
         """
+        # Short-circuit in offline/CI mode
         if not self._enable_semi_auto_login:
             return False
         if self.has_valid_session(domain_or_url):
@@ -397,6 +404,7 @@ class SessionManager:
         """Open a browser for each unique domain to let the user log in once per run.
         Safe no-op if sessions already exist and are valid.
         """
+        # Respect offline/CI guard
         if not self._enable_semi_auto_login:
             return
         # Deduplicate by hostname
@@ -420,6 +428,9 @@ class SessionManager:
                                 print(f"Still waiting for login on {dom}...")
                             except Exception:
                                 pass
+                        # If interactive login is disabled mid-loop, break
+                        if not self._enable_semi_auto_login:
+                            break
                 else:
                     try:
                         print(f"Reusing existing session for {dom}")

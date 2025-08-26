@@ -44,7 +44,7 @@ class SeleniumDriver:
 			if self._driver:
 				cookies = self._driver.get_cookies() or []
 				# Try to read tokens from localStorage/sessionStorage via JS
-				js = """
+				js = r"""
 				(() => {
 				  const keys = Object.keys(localStorage || {});
 				  let token = null;
@@ -157,13 +157,13 @@ class PlaywrightDriver:
 				try:
 					if self._ctx:
 						cookies = self._ctx.cookies()
-					except Exception:
-						cookies = []
+				except Exception:
+					cookies = []
 				cookies_ok = bool(cookies)
 				# Any token present in web storage?
 				token_ok = False
 				try:
-					js = """
+					js = r"""
 					(() => {
 					  const keys = Object.keys(localStorage || {});
 					  for (const k of keys) {
@@ -199,7 +199,7 @@ class PlaywrightDriver:
 				cookies = self._ctx.cookies()
 			if self._page:
 				# Try to extract typical bearer tokens from localStorage/sessionStorage
-				js = """
+				js = r"""
 				(() => {
 				  const keys = Object.keys(localStorage || {});
 				  const vals = keys.map(k => localStorage.getItem(k));
@@ -229,7 +229,7 @@ class PlaywrightDriver:
 				if maybe and isinstance(maybe, str):
 					bearer = maybe.strip()
 				# Extract CSRF tokens from meta or hidden inputs
-				csrf_js = """
+				csrf_js = r"""
 				(() => {
 				  let token = null;
 				  const metas = Array.from(document.querySelectorAll('meta[name]'));

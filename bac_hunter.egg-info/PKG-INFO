@@ -77,6 +77,25 @@ What it does:
 - Suggests synthetic identities (no brute-force)
 - Runs differential/IDOR/force-browse on a small sample
 
+### Authentication & Login Flow
+
+- At the start of each command, if semi‑automatic login is enabled, the tool will open a browser window for each unique target domain and prompt you to log in manually.
+- After you log in, cookies and tokens are automatically captured and saved under `sessions/<domain>.json` and reused for all subsequent requests.
+- Expired or missing cookies will trigger the login flow again.
+
+Environment variables:
+
+```bash
+export BH_SEMI_AUTO_LOGIN=true   # default: true
+export BH_BROWSER=playwright     # or 'selenium'
+export BH_LOGIN_TIMEOUT=180      # seconds
+export BH_SESSIONS_DIR=sessions  # where session files are stored
+```
+
+Docker notes:
+
+- The Docker image installs Playwright Chromium with required dependencies. Launch the container with proper display sharing or run in an environment where a visible browser is allowed.
+
 ### Unified Scans
 ```bash
 # Full pipeline

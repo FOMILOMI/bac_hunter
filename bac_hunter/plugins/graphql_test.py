@@ -3,6 +3,7 @@ import logging
 from typing import List, Dict, Any
 from urllib.parse import urljoin
 import json
+import os
 
 try:
 	from .base import Plugin
@@ -27,6 +28,16 @@ class GraphQLTester(Plugin):
 	category = "testing"
 
 	async def run(self, base_url: str, target_id: int) -> List[str]:
+		# Fast-exit guard for offline/CI environments to avoid long external waits
+		try:
+			if os.getenv("BH_OFFLINE", "0") == "1":
+				return []
+			# Treat extremely low timeout as signal to skip network-heavy probes
+			to = getattr(getattr(self, "http", None), "s", None)
+			if to is not None and float(getattr(to, "timeout_seconds", 0.0)) <= 2.0:
+				return []
+		except Exception:
+			pass
 		found: List[str] = []
 		# Gather candidate GraphQL endpoints from findings and common paths
 		candidates: List[str] = []
