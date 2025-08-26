@@ -44,8 +44,10 @@ class HttpClient:
         # simple in-memory GET cache for <400 responses (legacy)
         self._cache: Dict[str, tuple[float, httpx.Response]] = {}
         # smart dedup cache (normalized host+path -> last response)
-        self._dedup_cache: Dict[str, httpx.Response] = {}
+        # Store per-identity to avoid cross-identity reuse
+        self._dedup_cache: Dict[str, Dict[str, httpx.Response]] = {}
         # context-aware tested combinations to suppress redundant requests
+        # Track per-identity fingerprints to avoid skipping legitimate tests
         self._tested_fingerprints: set[str] = set()
 
     async def close(self):
@@ -133,6 +135,7 @@ class HttpClient:
         auth_state = self._auth_state_from_headers(headers)
         ident = headers.get("X-BH-Identity", "unknown")
         ctx = (context or "").strip().lower() if self.s.context_aware_dedup else ""
+        # Include identity and method to prevent cross-identity/method skipping
         return f"{key}:{method.upper()}:{ctx}:{auth_state}:{ident}"
 
     async def _request(self, method: str, url: str, *, headers: Optional[dict] = None, data: Any = None, json: Any = None, context: Optional[str] = None) -> httpx.Response:
@@ -152,8 +155,9 @@ class HttpClient:
             # Prepare headers early for fingerprint
             h = self._prepare_headers(headers)
             fingerprint = None
+            ident = h.get("X-BH-Identity", "unknown")
             if method.upper() == "GET":
-                # Smart dedup: reuse any prior result for same host+path (all status codes)
+                # Smart dedup: reuse only for same identity+context and same host+path
                 if getattr(self.s, "smart_dedup_enabled", False):
                     try:
                         if self.s.context_aware_dedup:
@@ -161,26 +165,28 @@ class HttpClient:
                             if fingerprint in self._tested_fingerprints:
                                 if self.s.verbosity == "debug" or self.s.verbosity == "smart":
                                     try:
-                                        log.info("[SKIP] Context-dedup %s (%s)", path_for_log(url), context or "")
+                                        log.info("[SKIP] Context-dedup %s (%s | id=%s)", path_for_log(url), context or "", ident)
                                     except Exception:
                                         pass
-                                # Attempt to reuse last response by host+path if available
+                                # Attempt to reuse last response for this identity by host+path if available
                                 key = dedup_key_for_url(url)
-                                cached_resp = self._dedup_cache.get(key)
+                                cache_for_key = self._dedup_cache.get(key) or {}
+                                cached_resp = cache_for_key.get(ident)
                                 if cached_resp is not None:
                                     return cached_resp
                                 # Otherwise fall through to avoid breaking semantics
                         else:
                             key = dedup_key_for_url(url)
-                            cached_resp = self._dedup_cache.get(key)
+                            cache_for_key = self._dedup_cache.get(key) or {}
+                            cached_resp = cache_for_key.get(ident)
                             if cached_resp is not None:
                                 if self.s.verbosity == "debug" or self.s.verbosity == "smart":
                                     try:
                                         msg_tag = "[SKIP]" if cached_resp.status_code >= 400 else "[CACHE]"
                                         if msg_tag == "[SKIP]":
-                                            log.info("%s Already tested %s (%s)", msg_tag, path_for_log(url), cached_resp.status_code)
+                                            log.info("%s Already tested %s (%s | id=%s)", msg_tag, path_for_log(url), cached_resp.status_code, ident)
                                         else:
-                                            log.info("%s Reusing result for %s (%s)", msg_tag, path_for_log(url), cached_resp.status_code)
+                                            log.info("%s Reusing result for %s (%s | id=%s)", msg_tag, path_for_log(url), cached_resp.status_code, ident)
                                     except Exception:
                                         pass
                                 return cached_resp
@@ -214,9 +220,12 @@ class HttpClient:
                         if getattr(self.s, "smart_dedup_enabled", False):
                             try:
                                 key = dedup_key_for_url(url)
-                                # Only cache first-seen result for host+path
+                                # Ensure per-identity cache bucket exists
                                 if key not in self._dedup_cache:
-                                    self._dedup_cache[key] = r
+                                    self._dedup_cache[key] = {}
+                                # Only cache first-seen result for identity at host+path
+                                if ident not in self._dedup_cache[key]:
+                                    self._dedup_cache[key][ident] = r
                                 # Record tested context fingerprint to suppress exact duplicates later
                                 if self.s.context_aware_dedup and fingerprint is None:
                                     fingerprint = self._build_context_fingerprint(url, method, h, context)
