@@ -34,6 +34,9 @@ class SessionManager:
         self._browser_driver: str = "playwright"
         self._login_timeout_seconds: int = 180
         self._enable_semi_auto_login: bool = True
+        # Retry and overall timeout guards to prevent infinite loops
+        self._max_login_retries: int = 3
+        self._overall_login_timeout_seconds: int = 240
         # Common login path hints for redirect detection
         self._login_path_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.IGNORECASE)
         # Optional extractors for custom apps to provide tokens
@@ -42,7 +45,7 @@ class SessionManager:
         import time as _t  # lazy to avoid global import noise
         self._now = _t.time
 
-    def configure(self, *, sessions_dir: str, browser_driver: Optional[str] = None, login_timeout_seconds: Optional[int] = None, enable_semi_auto_login: Optional[bool] = None):
+    def configure(self, *, sessions_dir: str, browser_driver: Optional[str] = None, login_timeout_seconds: Optional[int] = None, enable_semi_auto_login: Optional[bool] = None, max_login_retries: Optional[int] = None, overall_login_timeout_seconds: Optional[int] = None):
         import os
         self._sessions_dir = sessions_dir
         try:
@@ -55,9 +58,35 @@ class SessionManager:
             self._login_timeout_seconds = int(login_timeout_seconds)
         if enable_semi_auto_login is not None:
             self._enable_semi_auto_login = bool(enable_semi_auto_login)
+        if max_login_retries is not None:
+            try:
+                self._max_login_retries = max(0, int(max_login_retries))
+            except Exception:
+                pass
+        if overall_login_timeout_seconds is not None:
+            try:
+                self._overall_login_timeout_seconds = max(1, int(overall_login_timeout_seconds))
+            except Exception:
+                pass
         # CI/offline guard: disable interactive login when BH_OFFLINE=1
         try:
             if (os.getenv("BH_OFFLINE", "0") == "1"):
+                self._enable_semi_auto_login = False
+            # Optional env overrides for retries and overall timeout
+            val = os.getenv("BH_LOGIN_MAX_RETRIES")
+            if val is not None:
+                try:
+                    self._max_login_retries = max(0, int(val))
+                except Exception:
+                    pass
+            val = os.getenv("BH_LOGIN_OVERALL_TIMEOUT")
+            if val is not None:
+                try:
+                    self._overall_login_timeout_seconds = max(1, int(val))
+                except Exception:
+                    pass
+            # Allow user to skip any interactive login entirely
+            if os.getenv("BH_SKIP_LOGIN", "0") == "1":
                 self._enable_semi_auto_login = False
         except Exception:
             pass
@@ -389,16 +418,27 @@ class SessionManager:
             return False
         if self.has_valid_session(domain_or_url):
             return True
-        # Block until cookies/tokens are captured
-        while not self.has_valid_session(domain_or_url):
+        # Bounded retries with overall timeout to avoid infinite loops
+        attempts = 0
+        deadline = self._now() + max(self._login_timeout_seconds, self._overall_login_timeout_seconds)
+        while (attempts < self._max_login_retries) and (self._now() < deadline) and not self.has_valid_session(domain_or_url):
+            attempts += 1
+            try:
+                print(f"Attempt {attempts}/{self._max_login_retries}: Opening browser for login...")
+            except Exception:
+                pass
             ok = self.open_browser_login(domain_or_url)
-            # Continue waiting even if the previous attempt timed out
+            if self.has_valid_session(domain_or_url):
+                return True
+            # Feedback after failed attempt
             if not ok:
                 try:
-                    print("Waiting for successful login to complete...")
+                    remaining = max(0, int(deadline - self._now()))
+                    print(f"Login not detected yet. {remaining}s left; will retry if attempts remain...")
                 except Exception:
                     pass
-        return True
+        # Final check
+        return self.has_valid_session(domain_or_url)
 
     def prelogin_targets(self, targets: List[str]):
         """Open a browser for each unique domain to let the user log in once per run.
@@ -420,15 +460,23 @@ class SessionManager:
             try:
                 # Only open browser when session missing/expired
                 if not self.has_valid_session(dom):
-                    # Block until we have a valid session for this domain
-                    while not self.has_valid_session(dom):
+                    attempts = 0
+                    deadline = self._now() + max(self._login_timeout_seconds, self._overall_login_timeout_seconds)
+                    while (attempts < self._max_login_retries) and (self._now() < deadline) and not self.has_valid_session(dom):
+                        attempts += 1
+                        try:
+                            print(f"[{dom}] Login required. Attempt {attempts}/{self._max_login_retries}...")
+                        except Exception:
+                            pass
                         ok = self.open_browser_login(dom)
+                        if self.has_valid_session(dom):
+                            break
                         if not ok:
                             try:
-                                print(f"Still waiting for login on {dom}...")
+                                remaining = max(0, int(deadline - self._now()))
+                                print(f"[{dom}] Still waiting for login... {remaining}s remaining")
                             except Exception:
                                 pass
-                        # If interactive login is disabled mid-loop, break
                         if not self._enable_semi_auto_login:
                             break
                 else:
