@@ -151,88 +151,95 @@ class PlaywrightDriver:
 	def wait_for_manual_login(self, timeout_seconds: int = 180) -> bool:
 		if not self._page:
 			return False
+		import time, re
+		login_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.I)
+		start_url = ""
 		try:
-			import re, time
-			login_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.I)
 			start_url = self._page.url
-			end_by = time.time() + max(5, int(timeout_seconds))
-			# Guidance to user in console (best effort)
-			try:
-				print("Please complete login in the opened browser window. Waiting for authentication...")
-			except Exception:
-				pass
-			try:
-				print(f"[debug] Waiting up to {int(timeout_seconds)}s for manual login...")
-			except Exception:
-				pass
-			last_url = start_url
-			while time.time() < end_by:
-				# Briefly wait for network to settle each loop (less aggressive timeout)
-				try:
-					self._page.wait_for_load_state("networkidle", timeout=min(15000, max(1000, int((end_by - time.time()) * 1000))))
-				except Exception:
-					# Fall back to DOMContentLoaded if networkidle isn't reached
-					try:
-						self._page.wait_for_load_state("domcontentloaded", timeout=3000)
-					except Exception:
-						pass
-				# Check URL moved away from login-like paths
-				url_now = self._page.url or ""
-				moved = (url_now != last_url)
-				last_url = url_now
-				path = url_now
-				try:
-					from urllib.parse import urlparse as _u
-					path = _u(url_now).path or url_now
-				except Exception:
-					path = url_now
-				url_ok = (not login_re.search(path or "")) and (url_now != start_url)
-				# Any cookies set for context?
-				cookies = []
-				try:
-					if self._ctx:
-						cookies = self._ctx.cookies()
-				except Exception:
-					cookies = []
-				cookies_ok = bool(cookies)
-				# Any token present in web storage?
-				token_ok = False
-				try:
-					js = r"""
-					(() => {
-					  const keys = Object.keys(localStorage || {});
-					  for (const k of keys) {
-					    const v = localStorage.getItem(k) || '';
-					    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
-					  }
-					  const sk = Object.keys(sessionStorage || {});
-					  for (const k of sk) {
-					    const v = sessionStorage.getItem(k) || '';
-					    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
-					  }
-					  return false;
-					})()
-					"""
-					token_ok = bool(self._page.evaluate(js))
-				except Exception:
-					token_ok = False
-				# Consider login complete if any of the conditions met
-				if url_ok or token_ok or cookies_ok:
-					try:
-						print("[debug] Login detected; capturing session data...")
-					except Exception:
-						pass
-					# Small grace to ensure storage/cookies flush
-					try:
-						self._page.wait_for_timeout(1000)
-					except Exception:
-						pass
-					return True
-				# Small sleep between polls
-				time.sleep(0.5)
-			return False
 		except Exception:
-			return False
+			start_url = ""
+		end_by = time.time() + max(5, int(timeout_seconds))
+		# One-time guidance for the user
+		try:
+			print(f"[browser] Please complete login - you have {int(timeout_seconds)} seconds...")
+		except Exception:
+			pass
+		# Inject lightweight on-page banner with countdown (best effort)
+		self._inject_browser_guidance(int(timeout_seconds))
+		last_report = 0
+		last_url = start_url
+		while True:
+			now = time.time()
+			if now >= end_by:
+				return False
+			remaining = int(end_by - now)
+			# Periodic progress message
+			if remaining // 10 != last_report // 10:
+				try:
+					print(f"[waiting] Monitoring for authentication... {remaining}s remaining")
+				except Exception:
+					pass
+				last_report = remaining
+			# Soft settle without hard timeouts
+			try:
+				self._page.wait_for_load_state("domcontentloaded", timeout=2000)
+			except Exception:
+				pass
+			# URL-based heuristic
+			url_now = ""
+			try:
+				url_now = self._page.url or ""
+			except Exception:
+				url_now = ""
+			path = url_now
+			try:
+				from urllib.parse import urlparse as _u
+				path = _u(url_now).path or url_now
+			except Exception:
+				path = url_now
+			url_ok = bool(url_now) and (url_now != start_url) and (login_re.search(path or "") is None)
+			# Cookie heuristic
+			cookies_ok = False
+			try:
+				if self._ctx:
+					cookies_ok = bool(self._ctx.cookies())
+			except Exception:
+				cookies_ok = False
+			# Storage token heuristic
+			token_ok = False
+			try:
+				js = r"""
+				(() => {
+				  const keys = Object.keys(localStorage || {});
+				  for (const k of keys) {
+				    const v = localStorage.getItem(k) || '';
+				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
+				  }
+				  const sk = Object.keys(sessionStorage || {});
+				  for (const k of sk) {
+				    const v = sessionStorage.getItem(k) || '';
+				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
+				  }
+				  return false;
+				})()
+				"""
+				token_ok = bool(self._page.evaluate(js))
+			except Exception:
+				token_ok = False
+			if url_ok or token_ok or cookies_ok:
+				try:
+					print("[success] Login detected! Capturing session data...")
+				except Exception:
+					pass
+				try:
+					self._page.wait_for_timeout(1000)
+				except Exception:
+					pass
+				return True
+			try:
+				time.sleep(0.5)
+			except Exception:
+				pass
 
 	def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None]:
 		cookies: list = []
@@ -304,6 +311,48 @@ class PlaywrightDriver:
 			pass
 		return cookies, bearer, csrf
 
+	def _inject_browser_guidance(self, total_seconds: int):
+		# Best-effort UI overlay inside the page; failures are ignored
+		try:
+			if not self._page:
+				return
+			js = f"""
+			(() => {{
+			  try {{
+			    if (window.__BH_GUIDE__) return;
+			    const banner = document.createElement('div');
+			    banner.id = '__bh_login_banner__';
+			    banner.style.position = 'fixed';
+			    banner.style.zIndex = '2147483647';
+			    banner.style.left = '0';
+			    banner.style.right = '0';
+			    banner.style.bottom = '0';
+			    banner.style.padding = '10px 14px';
+			    banner.style.background = 'rgba(20,20,20,0.85)';
+			    banner.style.color = '#fff';
+			    banner.style.fontFamily = 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif';
+			    banner.style.fontSize = '14px';
+			    banner.style.textAlign = 'center';
+			    banner.style.pointerEvents = 'auto';
+			    let remain = {int(total_seconds)};
+			    banner.textContent = `Please complete login here. Time remaining: ${'{'}remain{'}'}s`;
+			    document.body.appendChild(banner);
+			    window.__BH_GUIDE__ = true;
+			    window.__BH_EXT_TIMER__ = setInterval(() => {{
+			      try {{
+			        remain = Math.max(0, remain - 1);
+			        const el = document.getElementById('__bh_login_banner__');
+			        if (el) el.textContent = `Please complete login here. Time remaining: ${'{'}remain{'}'}s`;
+			        if (remain <= 0) {{ clearInterval(window.__BH_EXT_TIMER__); }}
+			      }} catch {{}}
+			    }}, 1000);
+			  }} catch {{}}
+			}})()
+			"""
+			self._page.evaluate(js)
+		except Exception:
+			pass
+
 	def close(self):
 		try:
 			try:
@@ -340,19 +389,5 @@ class InteractiveLogin:
 			ok = False
 		# Attempt to extract regardless of ok; sometimes tokens/cookies exist even if heuristics failed
 		cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
-		# If nothing captured and initial wait timed out, give a final grace window
-		if not ok and not cookies and not bearer and not csrf:
-			try:
-				print("Login not detected yet. Keeping browser open for an extra 20s...")
-			except Exception:
-				pass
-			try:
-				self._drv.wait_for_manual_login(20)  # type: ignore[attr-defined]
-			except Exception:
-				pass
-			try:
-				cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
-			except Exception:
-				cookies, bearer, csrf = [], None, None
 		self._drv.close()
 		return cookies, bearer, csrf
