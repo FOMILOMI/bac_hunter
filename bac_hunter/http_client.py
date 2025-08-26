@@ -13,6 +13,7 @@ try:
     from .safety.throttle_calibrator import ThrottleCalibrator
     from .safety.waf_detector import WAFDetector
     from .safety.evasion import randomize_header_casing, soft_encode_url
+    from .access.oracle import AccessOracle
 except Exception:  # fallback when imported as top-level module
     from config import Settings
     from rate_limiter import RateLimiter, AdaptiveRateLimiter
@@ -21,6 +22,7 @@ except Exception:  # fallback when imported as top-level module
     from safety.throttle_calibrator import ThrottleCalibrator
     from safety.waf_detector import WAFDetector
     from safety.evasion import randomize_header_casing, soft_encode_url
+    from access.oracle import AccessOracle
 
 log = logging.getLogger("http")
 
@@ -51,6 +53,8 @@ class HttpClient:
         self._tested_fingerprints: set[str] = set()
         # session manager will be provided by orchestrator
         self._session_mgr = None
+        # Access oracle for FP control
+        self._oracle = AccessOracle() if getattr(self.s, 'enable_denial_fingerprinting', True) else None
 
     def attach_session_manager(self, session_manager):
         """Attach session manager after construction to avoid circular imports."""
@@ -195,6 +199,43 @@ class HttpClient:
         # Include identity and method to prevent cross-identity/method skipping
         return f"{key}:{method.upper()}:{ctx}:{auth_state}:{ident}"
 
+    async def _silent_refresh(self, url: str) -> bool:
+        """Attempt a silent session refresh using SessionManager hook.
+        Falls back to interactive login if enabled.
+        """
+        if not self._session_mgr:
+            self._ensure_session_manager()
+        if not self._session_mgr:
+            return False
+        try:
+            # For now reuse interactive path; future: POST to /refresh when configured
+            return bool(self._session_mgr.refresh_session(url))
+        except Exception:
+            return False
+
+    async def _maybe_confirm_stable(self, method: str, url: str, headers: Dict[str, str], data: Any, json_body: Any, context: Optional[str]) -> Optional[httpx.Response]:
+        """Optional median-of-3 sampling for unstable endpoints to reduce noise."""
+        if not self._oracle:
+            return None
+        if method.upper() != "GET":
+            return None
+        # perform two additional quick samples if oracle flagged flips previously
+        if not self._oracle.is_unstable(url):
+            return None
+        try:
+            r1 = await self._client.request(method, url, headers=headers, data=data, json=json_body)
+            r2 = await self._client.request(method, url, headers=headers, data=data, json=json_body)
+            # No fancy median here; pick the response that matches the majority classification
+            cl0 = "unknown"
+            # Note: caller will observe original response separately
+            c1 = self._oracle.classify(url, r1)
+            c2 = self._oracle.classify(url, r2)
+            if c1 == c2:
+                return r1
+        except Exception:
+            return None
+        return None
+
     async def _request(self, method: str, url: str, *, headers: Optional[dict] = None, data: Any = None, json: Any = None, context: Optional[str] = None) -> httpx.Response:
         # Normalize URL path to reduce duplicates
         try:
@@ -265,7 +306,18 @@ class HttpClient:
                         log.debug("%s %s -> %s", method.upper(), url, r.status_code)
                     ident = h.get("X-BH-Identity", "unknown")
                     self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
-                    # If auth is required (401/403 or redirect to login), try interactive login and retry once
+                    # Feed oracle and session manager with observations
+                    try:
+                        if self._oracle:
+                            self._oracle.observe_response(url, r)
+                    except Exception:
+                        pass
+                    try:
+                        if self._session_mgr and hasattr(self._session_mgr, 'process_response'):
+                            self._session_mgr.process_response(url, r)
+                    except Exception:
+                        pass
+                    # If auth is required (401/403 or redirect to login), try silent refresh, else interactive
                     try:
                         requires_auth = False
                         if self._session_mgr and hasattr(self._session_mgr, "check_auth_required"):
@@ -274,14 +326,21 @@ class HttpClient:
                             requires_auth = r.status_code in (401, 403)
                     except Exception:
                         requires_auth = r.status_code in (401, 403)
-                    if requires_auth and self.s.enable_semi_auto_login and attempt == 0:
-                        did_login = await self._maybe_prompt_for_login(url)
-                        if did_login:
+                    if requires_auth and attempt == 0:
+                        did_refresh = await self._silent_refresh(url)
+                        if not did_refresh and self.s.enable_semi_auto_login:
+                            did_refresh = await self._maybe_prompt_for_login(url)
+                        if did_refresh:
                             # Inject updated session and retry immediately
                             h = self._inject_domain_session(url, h)
                             r = await self._client.request(method, url, headers=h, data=data, json=json)
                             elapsed_ms = (time.perf_counter() - start) * 1000.0
                             self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
+                            try:
+                                if self._oracle:
+                                    self._oracle.observe_response(url, r)
+                            except Exception:
+                                pass
                     if self._waf is not None:
                         try:
                             body_sample = r.text[:512] if r.headers.get("content-type","" ).lower().startswith("text/") else ""
@@ -318,6 +377,14 @@ class HttpClient:
                                 await _aio.sleep(delay)
                             except Exception:
                                 pass
+                        # Optional stability confirmation for flappy endpoints
+                        try:
+                            if self._oracle and self._oracle.is_unstable(url):
+                                alt = await self._maybe_confirm_stable(method, url, h, data, json, context)
+                                if alt is not None:
+                                    r = alt
+                        except Exception:
+                            pass
                     return r
                 except Exception as e:
                     elapsed_ms = (time.perf_counter() - start) * 1000.0

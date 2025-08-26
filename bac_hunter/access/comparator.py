@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json
+import re
 from dataclasses import dataclass
 from typing import Any, Optional, Dict
 
@@ -13,6 +14,8 @@ class DiffResult:
     header_similarity: float = 0.0
     set_cookie_changed: bool = False
     time_bucket_same: bool = True
+    html_text_similarity: float = 0.0
+    json_error_score: float = 0.0
 
 class ResponseComparator:
     """Lightweight, privacy‑aware comparator (no full body storage).
@@ -21,10 +24,14 @@ class ResponseComparator:
     - json keys Jaccard: schema-ish overlap for APIs
     - headers: coarse similarity using normalized subset
     - timing: coarse buckets to detect throttling/time-based gates
+    - html similarity: text-level cosine-ish heuristic (very coarse)
+    - json error score: detect {error, message, code} shapes
     """
 
-    def __init__(self, bucket_pct: float = 0.05):
+    def __init__(self, bucket_pct: float = 0.05, html_sim_threshold: float = 0.6, json_err_threshold: float = 0.6):
         self.bucket_pct = max(0.01, min(bucket_pct, 0.25))
+        self.html_sim_threshold = max(0.0, min(html_sim_threshold, 1.0))
+        self.json_err_threshold = max(0.0, min(json_err_threshold, 1.0))
 
     def _bucket(self, n: int) -> int:
         if n <= 0:
@@ -70,6 +77,45 @@ class ResponseComparator:
         b = (h2 or {}).get('set-cookie') or ''
         return (a != b) and (a or b)
 
+    def _html_text(self, body: Optional[bytes]) -> str:
+        if not body:
+            return ""
+        try:
+            text = body.decode(errors="ignore")
+        except Exception:
+            return ""
+        # remove tags and collapse whitespace
+        text = re.sub(r"<[^>]+>", " ", text)
+        text = re.sub(r"\s+", " ", text).strip().lower()
+        return text[:5000]
+
+    def _html_similarity(self, b1: Optional[bytes], b2: Optional[bytes]) -> float:
+        t1 = self._html_text(b1)
+        t2 = self._html_text(b2)
+        if not t1 and not t2:
+            return 1.0
+        if not t1 or not t2:
+            return 0.0
+        # token Jaccard on words (coarse)
+        s1 = set(t1.split())
+        s2 = set(t2.split())
+        inter = len(s1 & s2)
+        union = max(1, len(s1 | s2))
+        return inter / union
+
+    def _json_error_score(self, body: Optional[bytes]) -> float:
+        try:
+            if not body:
+                return 0.0
+            obj = json.loads(body.decode(errors="ignore"))
+            if isinstance(obj, dict):
+                keys = {k.lower() for k in obj.keys() if isinstance(k, str)}
+                hit = sum(1 for k in ("error","message","code","status","detail") if k in keys)
+                return min(1.0, hit / 5.0)
+            return 0.0
+        except Exception:
+            return 0.0
+
     def compare(self, r1_status: int, r1_len: int, r1_ct: Optional[str], r1_body: Optional[bytes],
                       r2_status: int, r2_len: int, r2_ct: Optional[str], r2_body: Optional[bytes],
                       *, r1_headers: Optional[Dict[str, str]] = None, r2_headers: Optional[Dict[str, str]] = None,
@@ -88,6 +134,18 @@ class ResponseComparator:
         hdr_sim = self._header_similarity(r1_headers, r2_headers)
         cookie_changed = self._set_cookie_changed(r1_headers, r2_headers)
         time_bucket_same = (self._time_bucket(r1_elapsed_ms) == self._time_bucket(r2_elapsed_ms))
+        html_sim = 0.0
+        json_err = 0.0
+        try:
+            if (r1_ct or '').lower().startswith('text/html') or (r2_ct or '').lower().startswith('text/html'):
+                html_sim = self._html_similarity(r1_body, r2_body)
+        except Exception:
+            html_sim = 0.0
+        try:
+            if 'json' in (r1_ct or '').lower() or 'json' in (r2_ct or '').lower():
+                json_err = max(self._json_error_score(r1_body), self._json_error_score(r2_body))
+        except Exception:
+            json_err = 0.0
         if not same_status:
             hint = "status-diff"
         elif not same_len_bucket and overlap < 0.5:
@@ -98,9 +156,13 @@ class ResponseComparator:
             hint = "header-diff"
         elif not time_bucket_same:
             hint = "timing-diff"
+        elif html_sim < self.html_sim_threshold and (r1_ct or r2_ct):
+            hint = "html-diff"
+        elif json_err >= self.json_err_threshold:
+            hint = "json-error"
         else:
             hint = "similar"
-        return DiffResult(same_status, same_len_bucket, overlap, hint, header_similarity=hdr_sim, set_cookie_changed=cookie_changed, time_bucket_same=time_bucket_same)
+        return DiffResult(same_status, same_len_bucket, overlap, hint, header_similarity=hdr_sim, set_cookie_changed=cookie_changed, time_bucket_same=time_bucket_same, html_text_similarity=html_sim, json_error_score=json_err)
 
     def _json_keys(self, body: Optional[bytes]) -> set[str]:
         try:

@@ -19,6 +19,10 @@ log = logging.getLogger("recon.js")
 
 JS_PATH_RE = re.compile(r"['\"](/?[A-Za-z0-9_\-/\.]+?(?:\.php|\.aspx|\.jsp|/api/[^'\"\s]+|/v1/[^'\"\s]+|/v2/[^'\"\s]+|/admin[^'\"\s]*))['\"]")
 API_HINT_RE = re.compile(r"['\"](/api/[^'\"]+)['\"]")
+# SPA router patterns (React Router paths, Angular route path:, Next.js chunks)
+ROUTER_PATH_RE = re.compile(r"path\s*:\s*['\"](/[^'\"]+)['\"]|to\s*:\s*['\"](/[^'\"]+)['\"]|href\s*:\s*['\"](/[^'\"]+)['\"]")
+NEXT_CHUNK_PATH_RE = re.compile(r"/app/[^'\"]+/page\.(?:js|tsx)")
+ADMIN_HINT_RE = re.compile(r"/(admin|internal|manage|settings|reports|billing|users?/\:?[a-zA-Z_]+|tenants?/\:?[a-zA-Z_]+)", re.I)
 
 
 class JSEndpointsRecon(Plugin):
@@ -63,7 +67,9 @@ class JSEndpointsRecon(Plugin):
                 continue
             seen.add(un)
             final.append(un)
-            self.db.add_finding(target_id, "endpoint", un, evidence="js-scan", score=0.3)
+            # priority score based on admin hints
+            score = 0.35 if ADMIN_HINT_RE.search(un) else 0.3
+            self.db.add_finding(target_id, "endpoint", un, evidence="js-scan", score=score)
         log.info("%s -> %d endpoints", self.name, len(final))
         return final
 
@@ -76,5 +82,21 @@ class JSEndpointsRecon(Plugin):
             out.add(urljoin(base_url, path))
         for m in API_HINT_RE.finditer(text):
             out.add(urljoin(base_url, m.group(1)))
+        # SPA router route strings
+        for m in ROUTER_PATH_RE.finditer(text):
+            for i in range(1, 4):
+                val = m.group(i)
+                if val and val.startswith('/'):
+                    out.add(urljoin(base_url, val))
+        # Next.js app router chunks imply routes (best effort)
+        for m in NEXT_CHUNK_PATH_RE.finditer(text):
+            chunk = m.group(0)
+            if chunk:
+                try:
+                    # Derive path from chunk path
+                    p = '/' + '/'.join(chunk.split('/')[2:-1])
+                    out.add(urljoin(base_url, p))
+                except Exception:
+                    pass
         return out
 

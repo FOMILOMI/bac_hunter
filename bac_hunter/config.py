@@ -14,6 +14,10 @@ class Identity:
     base_headers: Dict[str, str] = field(default_factory=dict)
     cookie: Optional[str] = None  # raw Cookie header (optional)
     auth_bearer: Optional[str] = None  # JWT/Token (optional)
+    # Optional metadata for BAC testing (populated dynamically when available)
+    role: Optional[str] = None
+    user_id: Optional[str] = None
+    tenant_id: Optional[str] = None
 
     def headers(self) -> Dict[str, str]:
         h = {"User-Agent": self.base_headers.get("User-Agent", "bac-hunter/1.0 (+respectful)")}
@@ -62,6 +66,7 @@ class Settings:
     enable_recon_robots: bool = True
     enable_recon_sitemap: bool = True
     enable_recon_js_endpoints: bool = True
+    enable_recon_openapi: bool = _env("BH_RECON_OPENAPI", "true").lower() == "true"
 
     # Adaptive throttling and safety
     enable_adaptive_throttle: bool = _env("BH_ADAPTIVE_THROTTLE", "true").lower() == "true"
@@ -101,3 +106,13 @@ class Settings:
     enable_semi_auto_login: bool = _env("BH_SEMI_AUTO_LOGIN", "true").lower() == "true"
     login_timeout_seconds: int = int(_env("BH_LOGIN_TIMEOUT", "180"))
     browser_driver: str = _env("BH_BROWSER", "playwright")  # playwright|selenium
+
+    # Access Oracle / FP controls
+    enable_denial_fingerprinting: bool = _env("BH_DENIAL_FP", "true").lower() == "true"
+    html_similarity_threshold: float = float(_env("BH_HTML_SIM_T", "0.6"))
+    json_error_threshold: float = float(_env("BH_JSON_ERR_T", "0.6"))
+    confirm_retries: int = int(_env("BH_CONFIRM_RETRIES", "1"))
+    max_confirmation_delay_s: float = float(_env("BH_CONFIRM_DELAY", "1.0"))
+
+    # CSRF support
+    enable_csrf_support: bool = _env("BH_CSRF", "true").lower() == "true"

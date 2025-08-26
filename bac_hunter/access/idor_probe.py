@@ -13,6 +13,7 @@ try:
 	from ..utils import normalize_url, is_recursive_duplicate_path
 	from .comparator import ResponseComparator
 	from ..intelligence.ai import BAC_ML_Engine
+	from .oracle import AccessOracle
 except Exception:
 	from config import Identity, Settings
 	from http_client import HttpClient
@@ -20,6 +21,7 @@ except Exception:
 	from utils import normalize_url, is_recursive_duplicate_path
 	from access.comparator import ResponseComparator
 	from intelligence.ai import BAC_ML_Engine
+	from access.oracle import AccessOracle
 
 log = logging.getLogger("access.idor")
 
@@ -44,6 +46,7 @@ class IDORProbe:
 		self.db = db
 		self.cmp = ResponseComparator()
 		self.ml = BAC_ML_Engine(settings, db)
+		self.oracle = AccessOracle() if getattr(self.s, 'enable_denial_fingerprinting', True) else None
 
 	# --- Internal helpers ---
 	def _score_param(self, name: str) -> float:
@@ -197,6 +200,39 @@ class IDORProbe:
 				return self._score_param(name)
 		return sorted(params, key=score, reverse=True)
 
+	def _inject_identity_values(self, url: str, low: Identity, other: Identity) -> List[str]:
+		"""Generate direct subject/object swaps based on known identity metadata."""
+		outs: List[str] = []
+		parsed = urlsplit(url)
+		params = parse_qsl(parsed.query, keep_blank_values=True)
+		# Swap common subject identifiers
+		mapping = {
+			"user": (low.user_id, other.user_id),
+			"userid": (low.user_id, other.user_id),
+			"owner": (low.user_id, other.user_id),
+			"account": (low.user_id, other.user_id),
+			"tenant": (low.tenant_id, other.tenant_id),
+			"org": (low.tenant_id, other.tenant_id),
+			"workspace": (low.tenant_id, other.tenant_id),
+		}
+		for i, (k, v) in enumerate(params):
+			lk = k.lower()
+			if lk in mapping:
+				mine, theirs = mapping[lk]
+				if mine and theirs and v and v == mine and theirs != mine:
+					newp = list(params)
+					newp[i] = (k, theirs)
+					outs.append(urlunsplit(parsed._replace(query=urlencode(newp, doseq=True))))
+		# Path segment swap
+		segs = [s for s in parsed.path.split('/') if s]
+		if segs:
+			last = segs[-1]
+			if (low.user_id and other.user_id) and (ID_RE.fullmatch(last) or UUID_RE.fullmatch(last) or HEXLIKE_RE.fullmatch(last)):
+				new = list(segs)
+				new[-1] = other.user_id
+				outs.append(urlunsplit(parsed._replace(path='/' + '/'.join(new))))
+		return outs[:3]
+
 	def variants(self, base_url: str, url: str, max_variants: int = 8) -> List[str]:
 		parsed = urlparse(url)
 		path = parsed.path
@@ -289,6 +325,19 @@ class IDORProbe:
 				seen.add(nu); uniq.append(nu)
 		return uniq[:max_variants]
 
+	async def _controls_ok(self, low_resp, other_resp, deny_hint_low: str, deny_hint_other: str) -> bool:
+		"""Check positive/negative controls: low should allow baseline or be consistent; other should deny for protected resources."""
+		try:
+			# If low is allowed and other is denied, strong signal
+			if 200 <= low_resp.status_code < 300 and other_resp.status_code in (401,403):
+				return True
+			# If oracle present, use it for soft denials
+			if self.oracle:
+				return (self.oracle.is_allowed("", low_resp)) and self.oracle.is_denial("", other_resp)
+			return False
+		except Exception:
+			return False
+
 	async def test(self, base_url: str, url: str, low_priv: Identity, other_priv: Identity) -> None:
 		base_n = normalize_url(url)
 		r0 = await self.http.get(base_n, headers=low_priv.headers(), context="idor:baseline:low")
@@ -305,7 +354,17 @@ class IDORProbe:
 			"content_type": r0.headers.get("content-type", ""),
 			"elapsed_ms": float(elapsed0) if elapsed0 else 0.0,
 		}]
+		# Identity-aware direct swaps first (highest value)
+		candidates = []
+		try:
+			candidates.extend(self._inject_identity_values(base_n, low_priv, other_priv))
+		except Exception:
+			pass
+		# Fallback to heuristic variants
 		for v in self.variants(base_url, base_n):
+			if v not in candidates:
+				candidates.append(v)
+		for v in candidates:
 			rv = await self.http.get(v, headers=low_priv.headers(), context="idor:variant:low")
 			el_v = getattr(rv, 'elapsed', 0.0) if hasattr(rv, 'elapsed') else 0.0
 			self.db.save_probe_ext(url=v, identity=low_priv.name, status=rv.status_code, length=len(rv.content), content_type=rv.headers.get("content-type"), body=b"", elapsed_ms=float(el_v), headers=dict(rv.headers))
@@ -319,8 +378,8 @@ class IDORProbe:
 				log.warning("[!] Rate limited (429) on %s (other), backing off", v)
 				await asyncio.sleep(2.0)
 			diff = self.cmp.compare(r0.status_code, len(r0.content), r0.headers.get("content-type"), None,
-							rv.status_code, len(rv.content), rv.headers.get("content-type"), None,
-							r1_headers=dict(r0.headers), r2_headers=dict(rv.headers), r1_elapsed_ms=float(elapsed0 or 0.0), r2_elapsed_ms=float(el_v or 0.0))
+						rv.status_code, len(rv.content), rv.headers.get("content-type"), None,
+						r1_headers=dict(r0.headers), r2_headers=dict(rv.headers), r1_elapsed_ms=float(elapsed0 or 0.0), r2_elapsed_ms=float(el_v or 0.0))
 			# persist comparison for later ML/analytics
 			try:
 				self.db.save_comparison(url=v, id_a=low_priv.name, id_b=other_priv.name, same_status=diff.same_status, same_length_bucket=diff.same_length_bucket, json_keys_overlap=diff.json_keys_overlap, hint=diff.hint)
@@ -336,10 +395,35 @@ class IDORProbe:
 				"prev_status": r0.status_code,
 				"prev_length": len(r0.content),
 			})
-			if rv.status_code in (200, 206) and (not diff.same_status or not diff.same_length_bucket or diff.hint in ("header-diff","cookie-changed","timing-diff")):
-				hint = f"baseline->{rv.status_code} diff={diff.hint} other={ro.status_code}"
-				self.db.add_finding_for_url(v, type_="idor_suspect", evidence=hint, score=0.85 if ro.status_code in (401,403) else 0.75)
-				log.info("IDOR candidate: %s", v)
+			# Positive/negative control gate
+			allow_low = (200 <= rv.status_code < 300)
+			deny_other = ro.status_code in (401,403)
+			if self.oracle:
+				try:
+					allow_low = allow_low or self.oracle.is_allowed(v, rv)
+					deny_other = deny_other or self.oracle.is_denial(v, ro)
+				except Exception:
+					pass
+			if allow_low and (not diff.same_status or not diff.same_length_bucket or diff.hint in ("header-diff","cookie-changed","timing-diff","html-diff")):
+				# Confirmation retry if configured
+				confirmed = True
+				for _ in range(max(0, int(getattr(self.s, 'confirm_retries', 1)))):
+					await asyncio.sleep(float(getattr(self.s, 'max_confirmation_delay_s', 1.0)))
+					re_rv = await self.http.get(v, headers=low_priv.headers(), context="idor:confirm:low")
+					re_ro = await self.http.get(v, headers=other_priv.headers(), context="idor:confirm:other")
+					if self.oracle:
+						try:
+							if not (self.oracle.is_allowed(v, re_rv) and self.oracle.is_denial(v, re_ro)):
+								confirmed = False
+								break
+						except Exception:
+							pass
+				if confirmed:
+					hint = f"confirmed idor: diff={diff.hint} other={ro.status_code}"
+					self.db.add_finding_for_url(v, type_="idor_confirmed", evidence=hint, score=0.9 if (ro.status_code in (401,403) or (self.oracle and self.oracle.is_denial(v, ro))) else 0.8)
+					log.info("IDOR CONFIRMED: %s", v)
+				else:
+					self.db.add_finding_for_url(v, type_="idor_suspect", evidence=f"unconfirmed diff={diff.hint}", score=0.6)
 		# Behavioral analysis using ML engine
 		try:
 			stats = await self.ml.analyze_response_patterns(resp_rows)
