@@ -134,8 +134,8 @@ class HttpClient:
         if not self._session_mgr:
             return False
         try:
-            # Delegate to session manager for interactive login and persistence
-            return bool(self._session_mgr.open_browser_login(url))
+            # Block until authentication succeeds so scanning continues authenticated
+            return bool(self._session_mgr.ensure_logged_in(url))
         except Exception:
             return False
 

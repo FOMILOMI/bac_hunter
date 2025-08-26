@@ -101,12 +101,14 @@ class PlaywrightDriver:
 			self._ctx = self._browser.new_context()
 			self._page = self._ctx.new_page()
 		except Exception:
-			# Attempt auto-install of Playwright browsers, then retry once
+			# Attempt auto-install of Playwright browsers, then retry once (synchronously)
 			self._pl = None
 			try:
 				import subprocess, sys
-				print("[info] Playwright browsers missing; installing chromium...")
-				subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+				print("[info] Playwright browsers missing; installing chromium (this may take a minute)...")
+				# Block until installation completes
+				res = subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+				# Retry launch after install
 				from playwright.sync_api import sync_playwright  # type: ignore
 				self._pl = sync_playwright().start()
 				self._browser = self._pl.chromium.launch(headless=False)
@@ -123,9 +125,68 @@ class PlaywrightDriver:
 		if not self._page:
 			return False
 		try:
-			# Heuristics: wait for network to be idle and a cookie to appear
-			self._page.wait_for_load_state("networkidle", timeout=timeout_seconds * 1000)
-			return True
+			import re, time
+			login_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.I)
+			start_url = self._page.url
+			end_by = time.time() + max(5, int(timeout_seconds))
+			# Guidance to user in console (best effort)
+			try:
+				print("Please complete login in the opened browser window. Waiting for authentication...")
+			except Exception:
+				pass
+			last_url = start_url
+			while time.time() < end_by:
+				# Briefly wait for network to settle each loop
+				try:
+					self._page.wait_for_load_state("networkidle", timeout=5000)
+				except Exception:
+					pass
+				# Check URL moved away from login-like paths
+				url_now = self._page.url or ""
+				moved = (url_now != last_url)
+				last_url = url_now
+				path = url_now
+				try:
+					from urllib.parse import urlparse as _u
+					path = _u(url_now).path or url_now
+				except Exception:
+					path = url_now
+				url_ok = (not login_re.search(path or "")) and (url_now != start_url)
+				# Any cookies set for context?
+				cookies = []
+				try:
+					if self._ctx:
+						cookies = self._ctx.cookies()
+					except Exception:
+						cookies = []
+				cookies_ok = bool(cookies)
+				# Any token present in web storage?
+				token_ok = False
+				try:
+					js = """
+					(() => {
+					  const keys = Object.keys(localStorage || {});
+					  for (const k of keys) {
+					    const v = localStorage.getItem(k) || '';
+					    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) return true;
+					  }
+					  const sk = Object.keys(sessionStorage || {});
+					  for (const k of sk) {
+					    const v = sessionStorage.getItem(k) || '';
+					    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) return true;
+					  }
+					  return false;
+					})()
+					"""
+					token_ok = bool(self._page.evaluate(js))
+				except Exception:
+					token_ok = False
+				# Consider login complete if any of the conditions met
+				if url_ok or token_ok or cookies_ok:
+					return True
+				# Small sleep between polls
+				time.sleep(0.5)
+			return False
 		except Exception:
 			return False
 
