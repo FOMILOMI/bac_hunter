@@ -12,6 +12,7 @@ try:
     from .monitoring.stats_collector import StatsCollector
     from .safety.throttle_calibrator import ThrottleCalibrator
     from .safety.waf_detector import WAFDetector
+    from .safety.evasion import randomize_header_casing, soft_encode_url
 except Exception:  # fallback when imported as top-level module
     from config import Settings
     from rate_limiter import RateLimiter, AdaptiveRateLimiter
@@ -19,6 +20,7 @@ except Exception:  # fallback when imported as top-level module
     from monitoring.stats_collector import StatsCollector
     from safety.throttle_calibrator import ThrottleCalibrator
     from safety.waf_detector import WAFDetector
+    from safety.evasion import randomize_header_casing, soft_encode_url
 
 log = logging.getLogger("http")
 
@@ -66,6 +68,12 @@ class HttpClient:
         if "X-BH-Identity" not in h or h.get("X-BH-Identity") is None:
             identity_val = (headers or {}).get("X-BH-Identity")
             h["X-BH-Identity"] = identity_val or "unknown"
+        # Optional header casing randomization
+        try:
+            if self.s.enable_request_randomization:
+                h = randomize_header_casing(h)
+        except Exception:
+            pass
         return h
 
     def _auth_state_from_headers(self, headers: Dict[str, str]) -> str:
@@ -131,6 +139,12 @@ class HttpClient:
         # Normalize URL path to reduce duplicates
         try:
             url = normalize_url(url)
+        except Exception:
+            pass
+        # Optional soft-encoding to bypass naive filters
+        try:
+            if self.s.enable_encoding_bypass:
+                url = soft_encode_url(url)
         except Exception:
             pass
         host = host_of(url)
