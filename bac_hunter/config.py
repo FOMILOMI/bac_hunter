@@ -87,3 +87,8 @@ class Settings:
     # Smart discovery controls (default off to preserve backward compatibility)
     smart_dedup_enabled: bool = _env("BH_SMART_DEDUP", "false").lower() == "true"
     smart_backoff_enabled: bool = _env("BH_SMART_BACKOFF", "false").lower() == "true"
+
+    # Intelligent output verbosity: debug|smart|results
+    verbosity: str = _env("BH_VERBOSITY", "smart")
+    # Context-aware deduplication toggle (separate from smart_dedup_enabled to maintain legacy behavior)
+    context_aware_dedup: bool = _env("BH_CONTEXT_DEDUP", "true").lower() == "true"

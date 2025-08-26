@@ -43,6 +43,8 @@ class HttpClient:
         self._cache: Dict[str, tuple[float, httpx.Response]] = {}
         # smart dedup cache (normalized host+path -> last response)
         self._dedup_cache: Dict[str, httpx.Response] = {}
+        # context-aware tested combinations to suppress redundant requests
+        self._tested_fingerprints: set[str] = set()
 
     async def close(self):
         await self._client.aclose()
@@ -65,6 +67,14 @@ class HttpClient:
             identity_val = (headers or {}).get("X-BH-Identity")
             h["X-BH-Identity"] = identity_val or "unknown"
         return h
+
+    def _auth_state_from_headers(self, headers: Dict[str, str]) -> str:
+        auth = (headers.get("Authorization") or "").lower()
+        if auth.startswith("bearer "):
+            return "bearer"
+        if headers.get("Cookie"):
+            return "cookie"
+        return "none"
 
     def _cache_get(self, url: str) -> Optional[httpx.Response]:
         if not self.s.cache_enabled:
@@ -106,7 +116,18 @@ class HttpClient:
         if self._cal is not None:
             self._cal.record_response(status_code, elapsed_ms / 1000.0)
 
-    async def _request(self, method: str, url: str, *, headers: Optional[dict] = None, data: Any = None, json: Any = None) -> httpx.Response:
+    def _build_context_fingerprint(self, url: str, method: str, headers: Dict[str, str], context: Optional[str]) -> str:
+        # host+canonical path
+        try:
+            key = dedup_key_for_url(url)
+        except Exception:
+            key = url
+        auth_state = self._auth_state_from_headers(headers)
+        ident = headers.get("X-BH-Identity", "unknown")
+        ctx = (context or "").strip().lower() if self.s.context_aware_dedup else ""
+        return f"{key}:{method.upper()}:{ctx}:{auth_state}:{ident}"
+
+    async def _request(self, method: str, url: str, *, headers: Optional[dict] = None, data: Any = None, json: Any = None, context: Optional[str] = None) -> httpx.Response:
         # Normalize URL path to reduce duplicates
         try:
             url = normalize_url(url)
@@ -114,37 +135,55 @@ class HttpClient:
             pass
         host = host_of(url)
         async with self._sem:
-            # GET cache check
+            # Prepare headers early for fingerprint
+            h = self._prepare_headers(headers)
+            fingerprint = None
             if method.upper() == "GET":
                 # Smart dedup: reuse any prior result for same host+path (all status codes)
                 if getattr(self.s, "smart_dedup_enabled", False):
                     try:
-                        key = dedup_key_for_url(url)
-                        cached_resp = self._dedup_cache.get(key)
-                        if cached_resp is not None:
-                            try:
-                                msg_tag = "[SKIP]" if cached_resp.status_code >= 400 else "[CACHE]"
-                                if msg_tag == "[SKIP]":
-                                    log.info("%s Already tested %s (%s)", msg_tag, path_for_log(url), cached_resp.status_code)
-                                else:
-                                    log.info("%s Reusing result for %s (%s)", msg_tag, path_for_log(url), cached_resp.status_code)
-                            except Exception:
-                                pass
-                            return cached_resp
+                        if self.s.context_aware_dedup:
+                            fingerprint = self._build_context_fingerprint(url, method, h, context)
+                            if fingerprint in self._tested_fingerprints:
+                                if self.s.verbosity == "debug" or self.s.verbosity == "smart":
+                                    try:
+                                        log.info("[SKIP] Context-dedup %s (%s)", path_for_log(url), context or "")
+                                    except Exception:
+                                        pass
+                                # Attempt to reuse last response by host+path if available
+                                key = dedup_key_for_url(url)
+                                cached_resp = self._dedup_cache.get(key)
+                                if cached_resp is not None:
+                                    return cached_resp
+                                # Otherwise fall through to avoid breaking semantics
+                        else:
+                            key = dedup_key_for_url(url)
+                            cached_resp = self._dedup_cache.get(key)
+                            if cached_resp is not None:
+                                if self.s.verbosity == "debug" or self.s.verbosity == "smart":
+                                    try:
+                                        msg_tag = "[SKIP]" if cached_resp.status_code >= 400 else "[CACHE]"
+                                        if msg_tag == "[SKIP]":
+                                            log.info("%s Already tested %s (%s)", msg_tag, path_for_log(url), cached_resp.status_code)
+                                        else:
+                                            log.info("%s Reusing result for %s (%s)", msg_tag, path_for_log(url), cached_resp.status_code)
+                                    except Exception:
+                                        pass
+                                return cached_resp
                     except Exception:
                         pass
                 cached = self._cache_get(url)
                 if cached is not None:
                     return cached
             await self._respect_limits(host)
-            h = self._prepare_headers(headers)
             last_exc: Optional[Exception] = None
             for attempt in range(self.s.retry_times + 1):
                 start = time.perf_counter()
                 try:
                     r = await self._client.request(method, url, headers=h, data=data, json=json)
                     elapsed_ms = (time.perf_counter() - start) * 1000.0
-                    log.debug("%s %s -> %s", method.upper(), url, r.status_code)
+                    if self.s.verbosity == "debug":
+                        log.debug("%s %s -> %s", method.upper(), url, r.status_code)
                     ident = h.get("X-BH-Identity", "unknown")
                     self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
                     # WAF hinting for heavy throttling
@@ -161,9 +200,14 @@ class HttpClient:
                         if getattr(self.s, "smart_dedup_enabled", False):
                             try:
                                 key = dedup_key_for_url(url)
-                                # Only cache first-seen result
+                                # Only cache first-seen result for host+path
                                 if key not in self._dedup_cache:
                                     self._dedup_cache[key] = r
+                                # Record tested context fingerprint to suppress exact duplicates later
+                                if self.s.context_aware_dedup and fingerprint is None:
+                                    fingerprint = self._build_context_fingerprint(url, method, h, context)
+                                if self.s.context_aware_dedup and fingerprint is not None:
+                                    self._tested_fingerprints.add(fingerprint)
                             except Exception:
                                 pass
                         # 429 backoff (rate limiting awareness)
@@ -171,7 +215,8 @@ class HttpClient:
                             try:
                                 import random as _rnd, asyncio as _aio
                                 delay = _rnd.uniform(10.0, 30.0)
-                                log.warning("[!] 429 Too Many Requests on %s – backing off for %.1fs", path_for_log(url), delay)
+                                if self.s.verbosity != "results":
+                                    log.warning("[!] 429 Too Many Requests on %s – backing off for %.1fs", path_for_log(url), delay)
                                 await _aio.sleep(delay)
                             except Exception:
                                 pass
@@ -187,17 +232,17 @@ class HttpClient:
             assert last_exc is not None
             raise last_exc
 
-    async def get(self, url: str, headers: Optional[dict] = None) -> httpx.Response:
-        return await self._request("GET", url, headers=headers)
+    async def get(self, url: str, headers: Optional[dict] = None, context: Optional[str] = None) -> httpx.Response:
+        return await self._request("GET", url, headers=headers, context=context)
 
-    async def post(self, url: str, data: Optional[dict | str | bytes] = None, json: Optional[dict] = None, headers: Optional[dict] = None) -> httpx.Response:
-        return await self._request("POST", url, headers=headers, data=data, json=json)
+    async def post(self, url: str, data: Optional[dict | str | bytes] = None, json: Optional[dict] = None, headers: Optional[dict] = None, context: Optional[str] = None) -> httpx.Response:
+        return await self._request("POST", url, headers=headers, data=data, json=json, context=context)
 
-    async def put(self, url: str, data: Optional[dict | str | bytes] = None, json: Optional[dict] = None, headers: Optional[dict] = None) -> httpx.Response:
-        return await self._request("PUT", url, headers=headers, data=data, json=json)
+    async def put(self, url: str, data: Optional[dict | str | bytes] = None, json: Optional[dict] = None, headers: Optional[dict] = None, context: Optional[str] = None) -> httpx.Response:
+        return await self._request("PUT", url, headers=headers, data=data, json=json, context=context)
 
-    async def patch(self, url: str, data: Optional[dict | str | bytes] = None, json: Optional[dict] = None, headers: Optional[dict] = None) -> httpx.Response:
-        return await self._request("PATCH", url, headers=headers, data=data, json=json)
+    async def patch(self, url: str, data: Optional[dict | str | bytes] = None, json: Optional[dict] = None, headers: Optional[dict] = None, context: Optional[str] = None) -> httpx.Response:
+        return await self._request("PATCH", url, headers=headers, data=data, json=json, context=context)
 
-    async def delete(self, url: str, headers: Optional[dict] = None) -> httpx.Response:
-        return await self._request("DELETE", url, headers=headers)
+    async def delete(self, url: str, headers: Optional[dict] = None, context: Optional[str] = None) -> httpx.Response:
+        return await self._request("DELETE", url, headers=headers, context=context)
