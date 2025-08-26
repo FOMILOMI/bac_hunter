@@ -523,7 +523,7 @@ class SessionManager:
                 if domain:
                     self.save_domain_session(domain, cookies, bearer, csrf)
                     try:
-                        print(f"Session saved for {domain}")
+                        print(f"[debug] Session saved for {domain}")
                     except Exception:
                         pass
                 return True
