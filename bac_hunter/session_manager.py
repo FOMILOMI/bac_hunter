@@ -178,6 +178,7 @@ class SessionManager:
         """Return True if response indicates authentication is required.
 
         Triggers on 401/403, or 302/307 redirect to common login paths. Never on 404.
+        Also heuristically detects 200 OK login pages by path and content.
         """
         try:
             status = int(getattr(response, "status_code", 0) or 0)
@@ -185,6 +186,12 @@ class SessionManager:
             return False
         if status in (401, 403):
             return True
+        # Challenge header indicates auth even on 200
+        try:
+            if (response.headers.get("WWW-Authenticate") or response.headers.get("www-authenticate")):
+                return True
+        except Exception:
+            pass
         if status in (302, 307):
             try:
                 loc = (response.headers.get("Location") or response.headers.get("location") or "").strip()
@@ -198,6 +205,36 @@ class SessionManager:
                 path = loc
             if self._login_path_re.search(path or "") is not None:
                 return True
+        # Heuristic 200 OK login pages
+        if status == 200:
+            req_path = ""
+            try:
+                req_url = getattr(getattr(response, "request", None), "url", None)
+                if req_url:
+                    req_path = urlparse(str(req_url)).path or ""
+            except Exception:
+                req_path = ""
+            try:
+                ct = (response.headers.get("content-type") or "").lower()
+            except Exception:
+                ct = ""
+            body = ""
+            if "html" in ct and hasattr(response, "text"):
+                try:
+                    body = response.text or ""
+                except Exception:
+                    body = ""
+            # If path looks like login and body contains login indicators
+            if req_path and self._login_path_re.search(req_path or "") is not None:
+                if body and (re.search(r"type=\"password\"", body, flags=re.I) or re.search(r"\blogin\b|\bsign[ -]?in\b|\bauthenticate\b", body, flags=re.I)):
+                    return True
+            # Generic heuristic: both a password field and login keywords strongly suggest a login page
+            if body:
+                has_pwd = re.search(r"type=\s*[\"']password[\"']", body, flags=re.I) is not None
+                has_login_kw = re.search(r"\blogin\b|\bsign[ -]?in\b|\bauthenticat(e|ion)\b|\bmfa\b|two[- ]factor", body, flags=re.I) is not None
+                id_class_login = re.search(r"(id|class)=\s*[\"'][^\"']*(login|signin|auth)[^\"']*[\"']", body, flags=re.I) is not None
+                if has_pwd and (has_login_kw or id_class_login):
+                    return True
         # Explicitly avoid 404/broken links
         return False
 
@@ -289,7 +326,7 @@ class SessionManager:
     def open_browser_login(self, domain_or_url: str) -> bool:
         """Open an interactive browser for manual login and persist the session.
 
-        Returns True if any cookies or bearer token were captured.
+        Returns True if any cookies, bearer token, or CSRF token were captured.
         """
         if not self._enable_semi_auto_login:
             return False
@@ -315,12 +352,12 @@ class SessionManager:
                 return False
         try:
             drv = InteractiveLogin(driver=self._browser_driver)
-            cookies, bearer = drv.open_and_wait(target, timeout_seconds=self._login_timeout_seconds)
+            cookies, bearer, csrf = drv.open_and_wait(target, timeout_seconds=self._login_timeout_seconds)
             # Persist if anything was captured
-            if cookies or bearer:
+            if cookies or bearer or csrf:
                 domain = self._hostname_from_url(target)
                 if domain:
-                    self.save_domain_session(domain, cookies, bearer)
+                    self.save_domain_session(domain, cookies, bearer, csrf)
                 return True
         except Exception:
             pass

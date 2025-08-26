@@ -52,9 +52,10 @@ class PlaywrightDriver:
 		except Exception:
 			return False
 
-	def extract_cookies_and_tokens(self) -> tuple[list, str | None]:
+	def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None]:
 		cookies: list = []
 		bearer: str | None = None
+		csrf: str | None = None
 		try:
 			if self._ctx:
 				cookies = self._ctx.cookies()
@@ -89,9 +90,37 @@ class PlaywrightDriver:
 				maybe = self._page.evaluate(js)
 				if maybe and isinstance(maybe, str):
 					bearer = maybe.strip()
+				# Extract CSRF tokens from meta or hidden inputs
+				csrf_js = """
+				(() => {
+				  let token = null;
+				  const metas = Array.from(document.querySelectorAll('meta[name]'));
+				  for (const m of metas) {
+				    const name = (m.getAttribute('name') || '').toLowerCase();
+				    if (name.includes('csrf')) {
+				      token = m.getAttribute('content') || null;
+				      if (token) break;
+				    }
+				  }
+				  if (!token) {
+				    const inputs = Array.from(document.querySelectorAll('input[type="hidden"][name]'));
+				    for (const inp of inputs) {
+				      const nm = (inp.getAttribute('name') || '').toLowerCase();
+				      if (nm === 'csrf' || nm === '_csrf' || nm === 'csrf_token') {
+				        token = inp.getAttribute('value') || null;
+				        if (token) break;
+				      }
+				    }
+				  }
+				  return token;
+				})()
+				"""
+				maybe_csrf = self._page.evaluate(csrf_js)
+				if maybe_csrf and isinstance(maybe_csrf, str):
+					csrf = maybe_csrf.strip()
 		except Exception:
 			pass
-		return cookies, bearer
+		return cookies, bearer, csrf
 
 	def close(self):
 		try:
@@ -114,15 +143,15 @@ class InteractiveLogin:
 		else:
 			self._drv = PlaywrightDriver()
 
-	def open_and_wait(self, url: str, timeout_seconds: int = 180) -> tuple[list, str | None]:
+	def open_and_wait(self, url: str, timeout_seconds: int = 180) -> tuple[list, str | None, str | None]:
 		if not self._drv:
-			return [], None
+			return [], None, None
 		self._drv.open(url)
 		ok = False
 		try:
 			ok = self._drv.wait_for_manual_login(timeout_seconds)  # type: ignore[attr-defined]
 		except Exception:
 			ok = False
-		cookies, bearer = (self._drv.extract_cookies_and_tokens() if ok else ([], None))  # type: ignore[attr-defined]
+		cookies, bearer, csrf = (self._drv.extract_cookies_and_tokens() if ok else ([], None, None))  # type: ignore[attr-defined]
 		self._drv.close()
-		return cookies, bearer
+		return cookies, bearer, csrf
