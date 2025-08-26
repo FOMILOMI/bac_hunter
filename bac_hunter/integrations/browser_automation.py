@@ -50,13 +50,13 @@ class SeleniumDriver:
 				  let token = null;
 				  for (const k of keys) {
 				    const v = localStorage.getItem(k) || '';
-				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) { token = v; break; }
+				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) { token = v; break; }
 				  }
 				  if (!token) {
 				    const sk = Object.keys(sessionStorage || {});
 				    for (const k of sk) {
 				      const v = sessionStorage.getItem(k) || '';
-				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) { token = v; break; }
+				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) { token = v; break; }
 				    }
 				  }
 				  let csrf = null;
@@ -168,12 +168,12 @@ class PlaywrightDriver:
 					  const keys = Object.keys(localStorage || {});
 					  for (const k of keys) {
 					    const v = localStorage.getItem(k) || '';
-					    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) return true;
+					    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
 					  }
 					  const sk = Object.keys(sessionStorage || {});
 					  for (const k of sk) {
 					    const v = sessionStorage.getItem(k) || '';
-					    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) return true;
+					    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
 					  }
 					  return false;
 					})()
@@ -207,7 +207,7 @@ class PlaywrightDriver:
 				  let token = null;
 				  for (const k of keys) {
 				    const v = localStorage.getItem(k) || '';
-				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) {
+				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) {
 				      token = v;
 				      break;
 				    }
@@ -216,7 +216,7 @@ class PlaywrightDriver:
 				    const sk = Object.keys(sessionStorage || {});
 				    for (const k of sk) {
 				      const v = sessionStorage.getItem(k) || '';
-				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) {
+				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) {
 				        token = v;
 				        break;
 				      }
