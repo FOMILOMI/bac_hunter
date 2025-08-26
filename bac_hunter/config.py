@@ -40,6 +40,8 @@ class Settings:
 
     # Storage
     db_path: str = _env("BH_DB", "bac_hunter.db")
+    # Sessions storage directory (per-domain JSON files)
+    sessions_dir: str = _env("BH_SESSIONS_DIR", "sessions")
 
     # Respectful modes
     obey_robots: bool = _env("BH_OBEY_ROBOTS", "true").lower() == "true"
@@ -94,3 +96,8 @@ class Settings:
     verbosity: str = _env("BH_VERBOSITY", "smart")
     # Context-aware deduplication toggle (separate from smart_dedup_enabled to maintain legacy behavior)
     context_aware_dedup: bool = _env("BH_CONTEXT_DEDUP", "true").lower() == "true"
+
+    # Semi-automatic authentication flow
+    enable_semi_auto_login: bool = _env("BH_SEMI_AUTO_LOGIN", "true").lower() == "true"
+    login_timeout_seconds: int = int(_env("BH_LOGIN_TIMEOUT", "180"))
+    browser_driver: str = _env("BH_BROWSER", "playwright")  # playwright|selenium

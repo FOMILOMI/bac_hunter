@@ -31,7 +31,8 @@ class PlaywrightDriver:
 		try:
 			from playwright.sync_api import sync_playwright  # type: ignore
 			self._pl = sync_playwright().start()
-			self._browser = self._pl.chromium.launch(headless=True)
+			# Non-headless so user can interact
+			self._browser = self._pl.chromium.launch(headless=False)
 			self._ctx = self._browser.new_context()
 			self._page = self._ctx.new_page()
 		except Exception:
@@ -40,6 +41,57 @@ class PlaywrightDriver:
 	def open(self, url: str):
 		if self._page:
 			self._page.goto(url)
+
+	def wait_for_manual_login(self, timeout_seconds: int = 180) -> bool:
+		if not self._page:
+			return False
+		try:
+			# Heuristics: wait for network to be idle and a cookie to appear
+			self._page.wait_for_load_state("networkidle", timeout=timeout_seconds * 1000)
+			return True
+		except Exception:
+			return False
+
+	def extract_cookies_and_tokens(self) -> tuple[list, str | None]:
+		cookies: list = []
+		bearer: str | None = None
+		try:
+			if self._ctx:
+				cookies = self._ctx.cookies()
+			if self._page:
+				# Try to extract typical bearer tokens from localStorage/sessionStorage
+				js = """
+				(() => {
+				  const keys = Object.keys(localStorage || {});
+				  const vals = keys.map(k => localStorage.getItem(k));
+				  const joined = (vals.join(' ') || '').toLowerCase();
+				  let token = null;
+				  for (const k of keys) {
+				    const v = localStorage.getItem(k) || '';
+				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) {
+				      token = v;
+				      break;
+				    }
+				  }
+				  if (!token) {
+				    const sk = Object.keys(sessionStorage || {});
+				    for (const k of sk) {
+				      const v = sessionStorage.getItem(k) || '';
+				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) {
+				        token = v;
+				        break;
+				      }
+				    }
+				  }
+				  return token;
+				})()
+				"""
+				maybe = self._page.evaluate(js)
+				if maybe and isinstance(maybe, str):
+					bearer = maybe.strip()
+		except Exception:
+			pass
+		return cookies, bearer
 
 	def close(self):
 		try:
@@ -51,3 +103,26 @@ class PlaywrightDriver:
 				self._pl.stop()
 		except Exception:
 			pass
+
+
+class InteractiveLogin:
+	def __init__(self, driver: str = "playwright"):
+		self._driver_kind = driver
+		self._drv = None
+		if driver == "selenium":
+			self._drv = SeleniumDriver()
+		else:
+			self._drv = PlaywrightDriver()
+
+	def open_and_wait(self, url: str, timeout_seconds: int = 180) -> tuple[list, str | None]:
+		if not self._drv:
+			return [], None
+		self._drv.open(url)
+		ok = False
+		try:
+			ok = self._drv.wait_for_manual_login(timeout_seconds)  # type: ignore[attr-defined]
+		except Exception:
+			ok = False
+		cookies, bearer = (self._drv.extract_cookies_and_tokens() if ok else ([], None))  # type: ignore[attr-defined]
+		self._drv.close()
+		return cookies, bearer
