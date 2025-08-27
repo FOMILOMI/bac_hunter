@@ -133,7 +133,13 @@ class HttpClient:
                 try:
                     data = read_auth()
                     if data and is_auth_still_valid(data):
-                        cookies = data.get("cookies") or []
+                        # Filter cookies to this host only to prevent cross-site bleed
+                        try:
+                            from .session_manager import SessionManager  # type: ignore
+                        except Exception:
+                            from session_manager import SessionManager  # type: ignore
+                        _tmp_sm = SessionManager()
+                        cookies = _tmp_sm._filter_cookies_for_domain(host, data.get("cookies") or [])
                         bearer = data.get("bearer") or data.get("token")
                         csrf = data.get("csrf")
                         storage = data.get("storage")
