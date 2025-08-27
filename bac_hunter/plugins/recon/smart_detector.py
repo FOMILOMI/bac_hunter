@@ -9,7 +9,7 @@ try:
 	from ...http_client import HttpClient
 	from ...config import Settings
 	from ..base import Plugin
-except Exception:
+except ImportError:
 	from storage import Storage
 	from http_client import HttpClient
 	from config import Settings
@@ -49,7 +49,7 @@ class SmartEndpointDetector(Plugin):
                     # normalize and skip recursive duplicates like /admin/admin
                     try:
                         from ...utils import normalize_url, is_recursive_duplicate_path
-                    except Exception:
+                    except ImportError:
                         from utils import normalize_url, is_recursive_duplicate_path
                     u_n = normalize_url(u)
                     if is_recursive_duplicate_path(u_n.split('://',1)[-1].split('/',1)[-1] if '://' in u_n else u_n):
@@ -65,7 +65,7 @@ class SmartEndpointDetector(Plugin):
             url = urljoin(base_url, path)
             try:
                 from ...utils import normalize_url, is_recursive_duplicate_path
-            except Exception:
+            except ImportError:
                 from utils import normalize_url, is_recursive_duplicate_path
             url_n = normalize_url(url)
             if is_recursive_duplicate_path(url_n.split('://',1)[-1].split('/',1)[-1] if '://' in url_n else url_n):
@@ -86,7 +86,8 @@ class SmartEndpointDetector(Plugin):
                     log.warning("[!] Rate limited (429) on %s, backing off", url_n)
                     import asyncio as _aio
                     await _aio.sleep(2.0)
-            except Exception:
+            except (AttributeError, OSError, ValueError) as e:
+                log.debug(f"Failed to probe {url_n}: {e}")
                 continue
 
         # 3) Persist findings with basic risk scoring

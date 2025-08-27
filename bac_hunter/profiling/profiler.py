@@ -5,7 +5,7 @@ from typing import Optional
 try:
 	from ..config import Settings, Identity
 	from ..http_client import HttpClient
-except Exception:
+except ImportError:
 	from config import Settings, Identity
 	from http_client import HttpClient
 
@@ -63,6 +63,7 @@ class TargetProfiler:
 				framework = "laravel"
 			elif "wordpress" in (resp.text[:2000] or "").lower():
 				framework = "wordpress"
-		except Exception:
+		except (AttributeError, OSError, ValueError) as e:
+			# Log the error for debugging but don't fail the profiling
 			pass
 		return TargetProfile(kind=kind, auth_hint=auth_hint, server=server, framework=framework)

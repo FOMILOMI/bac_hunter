@@ -72,15 +72,21 @@ class HttpClient:
                 login_timeout_seconds=self.s.login_timeout_seconds,
                 enable_semi_auto_login=self.s.enable_semi_auto_login,
             )
-        except Exception:
+        except (AttributeError, OSError, ValueError) as e:
+            # Log specific errors for debugging but don't fail
+            log.debug(f"Session manager configuration failed: {e}")
             pass
 
     def _ensure_session_manager(self):
         if self._session_mgr is None:
             try:
                 from .session_manager import SessionManager  # lazy import to avoid cycles
-            except Exception:
-                from session_manager import SessionManager
+            except ImportError:
+                try:
+                    from session_manager import SessionManager
+                except ImportError:
+                    log.warning("SessionManager not available")
+                    return
             try:
                 self._session_mgr = SessionManager()
                 self._session_mgr.configure(
@@ -89,7 +95,8 @@ class HttpClient:
                     login_timeout_seconds=self.s.login_timeout_seconds,
                     enable_semi_auto_login=self.s.enable_semi_auto_login,
                 )
-            except Exception:
+            except (AttributeError, OSError, ValueError) as e:
+                log.debug(f"Session manager initialization failed: {e}")
                 self._session_mgr = None
 
     async def close(self):
@@ -116,7 +123,8 @@ class HttpClient:
         try:
             if self.s.enable_request_randomization:
                 h = randomize_header_casing(h)
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as e:
+            log.debug(f"Header randomization failed: {e}")
             pass
         return h
 
@@ -131,16 +139,24 @@ class HttpClient:
             if host:
                 try:
                     from .auth_store import read_auth, is_auth_still_valid, has_auth_data
-                except Exception:
-                    from auth_store import read_auth, is_auth_still_valid, has_auth_data
+                except ImportError:
+                    try:
+                        from auth_store import read_auth, is_auth_still_valid, has_auth_data
+                    except ImportError:
+                        log.debug("Auth store not available")
+                        return headers
                 try:
                     data = read_auth()
                     if data and has_auth_data(data) and is_auth_still_valid(data):
                         # Filter cookies to this host only to prevent cross-site bleed
                         try:
                             from .session_manager import SessionManager  # type: ignore
-                        except Exception:
-                            from session_manager import SessionManager  # type: ignore
+                        except ImportError:
+                            try:
+                                from session_manager import SessionManager  # type: ignore
+                            except ImportError:
+                                log.debug("SessionManager not available for cookie filtering")
+                                return headers
                         _tmp_sm = SessionManager()
                         cookies = _tmp_sm._filter_cookies_for_domain(host, data.get("cookies") or [])
                         bearer = data.get("bearer") or data.get("token")
@@ -149,17 +165,20 @@ class HttpClient:
                         try:
                             # Always update domain session with latest global data
                             self._session_mgr.save_domain_session(host, cookies, bearer, csrf, storage)
-                        except Exception:
+                        except (AttributeError, OSError, ValueError) as e:
+                            log.debug(f"Failed to save domain session: {e}")
                             pass
                 except Exception:
                     pass
                 try:
                     self._auth_store_hydrated.add(host)
-                except Exception:
+                except (AttributeError, TypeError) as e:
+                    log.debug(f"Failed to mark host as hydrated: {e}")
                     pass
             # Attach per-domain cookies/bearer to the request headers
             return self._session_mgr.attach_session(url, headers)
-        except Exception:
+        except (AttributeError, OSError, ValueError) as e:
+            log.debug(f"Session attachment failed: {e}")
             return headers
 
     async def _maybe_prompt_for_login(self, url: str) -> bool:
@@ -173,8 +192,12 @@ class HttpClient:
             # Check if we already have valid auth data before prompting
             try:
                 from .auth_store import read_auth, is_auth_still_valid, has_auth_data, probe_auth_valid
-            except Exception:
-                from auth_store import read_auth, is_auth_still_valid, has_auth_data, probe_auth_valid
+            except ImportError:
+                try:
+                    from auth_store import read_auth, is_auth_still_valid, has_auth_data, probe_auth_valid
+                except ImportError:
+                    log.debug("Auth store not available for login validation")
+                    return False
             
             data = read_auth()
             if data and has_auth_data(data):
@@ -192,31 +215,36 @@ class HttpClient:
                             self._auth_store_hydrated.add(host)
                             if self.s.verbosity != "results":
                                 log.info("✅ Auth probe succeeded (%s), reusing existing session for %s", probe_status, url)
-                        except Exception:
+                        except (AttributeError, OSError, ValueError) as e:
+                            log.debug(f"Failed to save session during auth probe: {e}")
                             pass
                         return True
                     else:
                         try:
                             if self.s.verbosity != "results":
                                 log.info("❌ Auth probe failed (%s), proceeding with fresh login for %s", probe_status, url)
-                        except Exception:
+                        except (AttributeError, OSError) as e:
+                            log.debug(f"Failed to log auth probe failure: {e}")
                             pass
                 else:
                     try:
                         if self.s.verbosity != "results":
                             log.info("⏰ Stored auth data appears expired, proceeding with fresh login for %s", url)
-                    except Exception:
+                    except (AttributeError, OSError) as e:
+                        log.debug(f"Failed to log auth expired message: {e}")
                         pass
             else:
                 try:
                     if self.s.verbosity != "results":
                         log.info("🔐 No stored auth data found, proceeding with fresh login for %s", url)
-                except Exception:
+                except (AttributeError, OSError) as e:
+                    log.debug(f"Failed to log no auth data message: {e}")
                     pass
             
             # Only proceed with interactive login if validation confirms it's needed
             return bool(self._session_mgr.ensure_logged_in(url))
-        except Exception:
+        except (AttributeError, OSError, ValueError, ImportError) as e:
+            log.debug(f"Login validation failed: {e}")
             return False
 
     def _auth_state_from_headers(self, headers: Dict[str, str]) -> str:
@@ -237,7 +265,8 @@ class HttpClient:
         if (time.time() - ts) > self.s.cache_ttl_seconds:
             try:
                 del self._cache[url]
-            except Exception:
+            except KeyError:
+                # Item already removed
                 pass
             return None
         return resp

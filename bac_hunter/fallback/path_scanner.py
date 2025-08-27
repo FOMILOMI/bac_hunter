@@ -7,7 +7,7 @@ try:
 	from ..config import Settings, Identity
 	from ..http_client import HttpClient
 	from ..storage import Storage
-except Exception:
+except ImportError:
 	from config import Settings, Identity
 	from http_client import HttpClient
 	from storage import Storage
@@ -63,7 +63,8 @@ class PathScanner:
                 if resp.status_code in (200, 206, 401, 403):
                     self.db.add_finding_for_url(url, "endpoint", f"status={resp.status_code}", 0.15)
                     found.append(url)
-            except Exception:
+            except (AttributeError, OSError, ValueError) as e:
+                log.debug(f"Failed to probe {url}: {e}")
                 pass
 
         await asyncio.gather(*(probe(p) for p in self.paths[:100]))

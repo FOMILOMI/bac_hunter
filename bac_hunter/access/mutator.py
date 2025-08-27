@@ -8,7 +8,7 @@ try:
 	from ..http_client import HttpClient
 	from ..storage import Storage
 	from .comparator import ResponseComparator
-except Exception:
+except ImportError:
 	from config import Identity, Settings
 	from http_client import HttpClient
 	from storage import Storage
@@ -53,7 +53,8 @@ class RequestMutator:
     async def run_get_mutations(self, url: str, ident: Identity):
         try:
             base = await self.http.get(url, headers=ident.headers())
-        except Exception:
+        except (AttributeError, OSError, ValueError) as e:
+            log.debug(f"Failed to fetch base URL {url}: {e}")
             return
         variants = []
         variants += self._boolean_flips(url)
@@ -61,7 +62,8 @@ class RequestMutator:
         for v in variants[:3]:
             try:
                 r = await self.http.get(v, headers=ident.headers())
-            except Exception:
+            except (AttributeError, OSError, ValueError) as e:
+                log.debug(f"Failed to fetch variant {v}: {e}")
                 continue
             diff = self.cmp.compare(base.status_code, len(base.content), base.headers.get("content-type"), None,
                                     r.status_code, len(r.content), r.headers.get("content-type"), None)
@@ -76,7 +78,8 @@ class RequestMutator:
         try:
             a = await self.http.get(url, headers=ident.headers())
             b = await self.http.post(urlunsplit((sp.scheme, sp.netloc, sp.path, "", sp.fragment)), data=form, headers=ident.headers())
-        except Exception:
+        except (AttributeError, OSError, ValueError) as e:
+            log.debug(f"Failed to test GET->POST for {url}: {e}")
             return
         diff = self.cmp.compare(a.status_code, len(a.content), a.headers.get("content-type"), None,
                                 b.status_code, len(b.content), b.headers.get("content-type"), None)

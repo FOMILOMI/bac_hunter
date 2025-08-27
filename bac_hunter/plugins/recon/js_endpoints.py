@@ -9,7 +9,7 @@ try:
 	from ...http_client import HttpClient
 	from ...config import Settings
 	from ..base import Plugin
-except Exception:
+except ImportError:
 	from storage import Storage
 	from http_client import HttpClient
 	from config import Settings
@@ -51,7 +51,7 @@ class JSEndpointsRecon(Plugin):
         # Normalize, dedup, skip recursive nonsense
         try:
             from ...utils import normalize_url, is_recursive_duplicate_path
-        except Exception:
+        except ImportError:
             from utils import normalize_url, is_recursive_duplicate_path
         final = []
         seen = set()
@@ -96,7 +96,8 @@ class JSEndpointsRecon(Plugin):
                     # Derive path from chunk path
                     p = '/' + '/'.join(chunk.split('/')[2:-1])
                     out.add(urljoin(base_url, p))
-                except Exception:
+                except (IndexError, ValueError) as e:
+                    log.debug(f"Failed to process Next.js chunk {chunk}: {e}")
                     pass
         return out
 

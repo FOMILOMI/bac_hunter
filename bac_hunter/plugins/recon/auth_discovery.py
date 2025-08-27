@@ -9,7 +9,7 @@ try:
 	from ...http_client import HttpClient
 	from ...config import Settings
 	from ..base import Plugin
-except Exception:
+except ImportError:
 	from storage import Storage
 	from http_client import HttpClient
 	from config import Settings
@@ -48,7 +48,7 @@ class AuthDiscoveryRecon(Plugin):
             r = await self.http.get(start_url)
             self.db.save_page(target_id, start_url, r.status_code, r.headers.get("content-type"), r.content)
             text = r.text or ""
-        except Exception as e:
+        except (AttributeError, OSError, ValueError) as e:
             log.debug("homepage fetch failed: %s", e)
             text = ""
 
@@ -91,7 +91,8 @@ class AuthDiscoveryRecon(Plugin):
                     log.info("[CACHE] Reusing result for %s (%s)", url, cached_status)
                 else:
                     resp = await self.http.get(url)
-            except Exception:
+            except (AttributeError, OSError, ValueError) as e:
+                log.debug(f"Failed to probe {url}: {e}")
                 continue
             ctype = resp.headers.get("content-type", "")
             body_bytes = resp.content if (resp.status_code < 400 and ctype.lower().startswith("text/")) else b""

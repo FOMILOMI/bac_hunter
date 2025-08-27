@@ -9,7 +9,7 @@ try:
 	from ...http_client import HttpClient
 	from ...config import Settings
 	from ..base import Plugin
-except Exception:
+except ImportError:
 	from storage import Storage
 	from http_client import HttpClient
 	from config import Settings

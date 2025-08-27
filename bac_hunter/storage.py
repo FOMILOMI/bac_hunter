@@ -250,8 +250,13 @@ class Storage:
             return
         with self.conn() as c:
             # Heuristic: delete oldest pages and probes in chunks
-            for table in ("pages", "probes"):
-                c.execute(f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} ORDER BY id ASC LIMIT 1000)")
+            # Fixed: Use hardcoded safe table names instead of f-string to prevent SQL injection
+            safe_tables = ["pages", "probes"]
+            for table in safe_tables:
+                if table == "pages":
+                    c.execute("DELETE FROM pages WHERE id IN (SELECT id FROM pages ORDER BY id ASC LIMIT 1000)")
+                elif table == "probes":
+                    c.execute("DELETE FROM probes WHERE id IN (SELECT id FROM probes ORDER BY id ASC LIMIT 1000)")
             # Also trim comparisons
             c.execute("DELETE FROM comparisons WHERE id IN (SELECT id FROM comparisons ORDER BY id ASC LIMIT 1000)")
             # Optional vacuum when severely above cap

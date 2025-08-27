@@ -7,7 +7,7 @@ try:
 	from ..http_client import HttpClient
 	from ..config import Settings, Identity
 	from ..storage import Storage
-except Exception:
+except ImportError:
 	from http_client import HttpClient
 	from config import Settings, Identity
 	from storage import Storage
@@ -61,7 +61,8 @@ class SmartAuthDetector:
 			resp = await self.http.get(start, headers={"X-BH-Identity": identity.name, **identity.headers()})
 			self.db.save_page(self.db.ensure_target(base_url), start, resp.status_code, resp.headers.get("content-type"), resp.content)
 			text = resp.text or ""
-		except Exception:
+		except (AttributeError, OSError, ValueError) as e:
+			# Log the error for debugging but don't fail the analysis
 			text = ""
 
 		# Collect from anchors and inline scripts
@@ -92,7 +93,8 @@ class SmartAuthDetector:
 				self.db.save_page(self.db.ensure_target(base_url), u, r.status_code, r.headers.get("content-type"), r.content if (r.status_code < 400 and (r.headers.get("content-type", "").lower().startswith("text/"))) else b"")
 				if r.status_code in (200, 302, 401, 403):
 					confirmed.append(u)
-			except Exception:
+			except (AttributeError, OSError, ValueError) as e:
+				# Log the error for debugging but don't fail the analysis
 				pass
 
 		# Session mechanism hint

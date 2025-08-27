@@ -8,7 +8,7 @@ try:
 	from ...http_client import HttpClient
 	from ...config import Settings
 	from ..base import Plugin
-except Exception:
+except ImportError:
 	from storage import Storage
 	from http_client import HttpClient
 	from config import Settings
@@ -38,7 +38,7 @@ class RobotsRecon(Plugin):
                     candidate = urljoin(base_url, path)
                     try:
                         from ...utils import normalize_url, is_recursive_duplicate_path
-                    except Exception:
+                    except ImportError:
                         from utils import normalize_url, is_recursive_duplicate_path
                     candidate_n = normalize_url(candidate)
                     # Skip recursive nonsense

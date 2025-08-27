@@ -1,6 +1,6 @@
 try:
     from .export import Exporter
-except Exception:
+except ImportError:
     from reporting.export import Exporter
 
 __all__ = ["Exporter"]

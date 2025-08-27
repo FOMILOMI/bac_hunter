@@ -7,7 +7,7 @@ try:
 	from ..config import Settings, Identity
 	from ..http_client import HttpClient
 	from ..storage import Storage
-except Exception:
+except ImportError:
 	from config import Settings, Identity
 	from http_client import HttpClient
 	from storage import Storage
@@ -49,7 +49,8 @@ class AutonomousAuthEngine:
         try:
             r = await self.http.get(start, headers=unauth.headers())
             text = r.text or ""
-        except Exception:
+        except (AttributeError, OSError, ValueError) as e:
+            # Log the error for debugging but don't fail the discovery
             text = ""
 
         links = re.findall(r"href=[\"']([^\"'#>\s]+)[\"']", text, flags=re.IGNORECASE)
@@ -66,7 +67,8 @@ class AutonomousAuthEngine:
             for u in urls:
                 try:
                     resp = await self.http.get(u, headers=unauth.headers())
-                except Exception:
+                except (AttributeError, OSError, ValueError) as e:
+                    # Log the error for debugging but don't fail the discovery
                     continue
                 ctype = resp.headers.get("content-type", "")
                 body_bytes = resp.content if (resp.status_code < 400 and ctype.lower().startswith("text/")) else b""
@@ -84,7 +86,8 @@ class AutonomousAuthEngine:
                 session_token_hint = "cookie"
             if (home.headers.get("www-authenticate") or "").lower().find("bearer") >= 0:
                 session_token_hint = session_token_hint or "bearer"
-        except Exception:
+        except (AttributeError, OSError, ValueError) as e:
+            # Log the error for debugging but don't fail the discovery
             pass
         if auth and auth.auth_bearer:
             session_token_hint = "bearer"
