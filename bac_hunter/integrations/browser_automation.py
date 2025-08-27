@@ -40,6 +40,7 @@ class SeleniumDriver:
 	def __init__(self):
 		try:
 			from selenium import webdriver  # type: ignore
+			from selenium.webdriver.common.by import By  # type: ignore  # noqa: F401
 			from selenium.webdriver.chrome.options import Options  # type: ignore
 			opts = Options()
 			# Non-headless to allow manual login
@@ -59,12 +60,66 @@ class SeleniumDriver:
 			return False
 		try:
 			from selenium.webdriver.support.ui import WebDriverWait  # type: ignore
-			# Heuristic: wait for any cookie to be set or URL to change away from login-like paths
-			login_like = ["login", "signin", "auth", "session"]
+			from selenium.webdriver.common.by import By  # type: ignore
+			import os, re
+
+			# Heuristic: wait for clear signs of authentication, not just any cookie
+			login_like = ["login", "signin", "sign-in", "account", "user/login", "users/sign_in", "auth", "session", "sso"]
 			start_url = self._driver.current_url
-			WebDriverWait(self._driver, timeout_seconds).until(
-				lambda d: (d.get_cookies() and len(d.get_cookies()) > 0) or (d.current_url != start_url and not any(x in d.current_url.lower() for x in login_like))
-			)
+			success_selector = os.getenv("BH_LOGIN_SUCCESS_SELECTOR", "").strip() or None
+			cookie_names_env = os.getenv("BH_AUTH_COOKIE_NAMES", "").strip()
+			default_cookie_names = [
+				"sessionid", "session_id", "session", "_session", "sid", "connect.sid",
+				"auth", "auth_token", "token", "jwt", "access_token"
+			]
+			auth_cookie_names = [c.strip().lower() for c in (cookie_names_env.split(",") if cookie_names_env else default_cookie_names) if c.strip()]
+
+			def has_auth_cookie(cookies: list[dict]) -> bool:
+				try:
+					for c in cookies or []:
+						name = str(c.get("name") or "").lower()
+						if not name:
+							continue
+						if name in auth_cookie_names or any(n in name for n in auth_cookie_names):
+							return True
+					return False
+				except Exception:
+					return False
+
+			def has_logout_element() -> bool:
+				try:
+					els = self._driver.find_elements(By.XPATH, "//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'logout')]|//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'logout')]|//a[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'sign out')]|//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'), 'sign out')]")
+					return bool(els)
+				except Exception:
+					return False
+
+			def condition(d):
+				try:
+					# URL change away from login-like paths
+					url_now = d.current_url or ""
+					url_ok = (url_now != start_url) and (not any(x in url_now.lower() for x in login_like))
+					# Auth cookie present
+					cookies = d.get_cookies() or []
+					cookies_ok = has_auth_cookie(cookies)
+					# Logged-in selector or logout element exists
+					selector_ok = False
+					if success_selector:
+						try:
+							selector_ok = len(d.find_elements(By.CSS_SELECTOR, success_selector)) > 0
+						except Exception:
+							selector_ok = False
+					logout_ok = has_logout_element()
+					# Token presence in storage (best-effort)
+					try:
+						js = ("return (function(){try{const ks=Object.keys(localStorage||{});for(const k of ks){const v=localStorage.getItem(k)||'';if(/bearer|token|jwt|auth/i.test(k)||/eyJ[A-Za-z0-9_-]{10,}\\\./.test(v))return true;}const sk=Object.keys(sessionStorage||{});for(const k of sk){const v=sessionStorage.getItem(k)||'';if(/bearer|token|jwt|auth/i.test(k)||/eyJ[A-Za-z0-9_-]{10,}\\\./.test(v))return true;}return false;}catch(e){return false;}})();")
+						token_ok = bool(d.execute_script(js))
+					except Exception:
+						token_ok = False
+					return url_ok or cookies_ok or selector_ok or logout_ok or token_ok
+				except Exception:
+					return False
+
+			WebDriverWait(self._driver, timeout_seconds).until(condition)
 			return True
 		except Exception:
 			return False
@@ -196,7 +251,7 @@ class PlaywrightDriver:
 		if not self._page:
 			return False
 
-		import asyncio, re
+		import asyncio, re, os
 		login_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.I)
 
 		try:
@@ -209,6 +264,30 @@ class PlaywrightDriver:
 
 		deadline = asyncio.get_event_loop().time() + timeout_seconds
 		last_report = 0
+
+		# Optional explicit success selector and auth cookie names from env
+		success_selector = os.getenv("BH_LOGIN_SUCCESS_SELECTOR", "").strip() or None
+		cookie_names_env = os.getenv("BH_AUTH_COOKIE_NAMES", "").strip()
+		default_cookie_names = [
+			"sessionid", "session_id", "session", "_session", "sid", "connect.sid",
+			"auth", "auth_token", "token", "jwt", "access_token"
+		]
+		auth_cookie_names = [c.strip().lower() for c in (cookie_names_env.split(",") if cookie_names_env else default_cookie_names) if c.strip()]
+
+		async def has_auth_cookie() -> bool:
+			try:
+				if not self._ctx:
+					return False
+				cookies = await self._ctx.cookies()
+				for c in cookies or []:
+					name = str(c.get("name") or "").lower()
+					if not name:
+						continue
+					if name in auth_cookie_names or any(n in name for n in auth_cookie_names):
+						return True
+				return False
+			except Exception:
+				return False
 
 		while True:
 			now = asyncio.get_event_loop().time()
@@ -235,11 +314,8 @@ class PlaywrightDriver:
 
 				url_ok = bool(url_now) and (url_now != start_url) and (login_re.search(path) is None)
 
-				# Cookies check
-				cookies_ok = False
-				if self._ctx:
-					cookies = await self._ctx.cookies()
-					cookies_ok = bool(cookies)
+				# Cookies check (auth-like cookies only)
+				cookies_ok = await has_auth_cookie()
 
 				# Token check
 				token_ok = False
@@ -263,7 +339,19 @@ class PlaywrightDriver:
 				except Exception:
 					pass
 
-				if url_ok or token_ok or cookies_ok:
+				# Logged-in UI indicator: explicit selector or common logout texts
+				selector_ok = False
+				try:
+					if success_selector:
+						locator = self._page.locator(success_selector)
+						selector_ok = (await locator.count()) > 0
+					else:
+						logout_locator = self._page.locator("a:has-text('Logout'), button:has-text('Logout'), a:has-text('Sign out'), button:has-text('Sign out')")
+						selector_ok = (await logout_locator.count()) > 0
+				except Exception:
+					selector_ok = False
+
+				if url_ok or token_ok or cookies_ok or selector_ok:
 					print("[success] Login detected! Capturing session data...")
 					await asyncio.sleep(1)  # Grace period
 					return True
@@ -422,13 +510,17 @@ class InteractiveLogin:
 			def run_sync():
 				try:
 					self._drv.open(url)
+					login_ok = False
 					try:
-						self._drv.wait_for_manual_login(timeout_seconds)  # type: ignore[attr-defined]
+						login_ok = bool(self._drv.wait_for_manual_login(timeout_seconds))  # type: ignore[attr-defined]
 					except Exception:
-						pass
-					cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+						login_ok = False
+					if login_ok:
+						cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+						self._drv.close()
+						return cookies, bearer, csrf
 					self._drv.close()
-					return cookies, bearer, csrf
+					return [], None, None
 				except Exception:
 					try:
 						self._drv.close()
@@ -444,13 +536,17 @@ class InteractiveLogin:
 			if not ok:
 				return [], None, None
 			await self._drv.open(url)  # type: ignore[attr-defined]
+			login_ok = False
 			try:
-				await self._drv.wait_for_manual_login(timeout_seconds)  # type: ignore[attr-defined]
+				login_ok = bool(await self._drv.wait_for_manual_login(timeout_seconds))  # type: ignore[attr-defined]
 			except Exception:
-				pass
-			cookies, bearer, csrf = await self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+				login_ok = False
+			if login_ok:
+				cookies, bearer, csrf = await self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+				await self._drv.close()  # type: ignore[attr-defined]
+				return cookies, bearer, csrf
 			await self._drv.close()  # type: ignore[attr-defined]
-			return cookies, bearer, csrf
+			return [], None, None
 		except Exception:
 			try:
 				await self._drv.close()  # type: ignore[attr-defined]
