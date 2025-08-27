@@ -55,6 +55,8 @@ class HttpClient:
         self._session_mgr = None
         # Access oracle for FP control
         self._oracle = AccessOracle() if getattr(self.s, 'enable_denial_fingerprinting', True) else None
+        # Track which domains we've hydrated from global auth store
+        self._auth_store_hydrated: set[str] = set()
 
     def attach_session_manager(self, session_manager):
         """Attach session manager after construction to avoid circular imports."""
@@ -121,6 +123,30 @@ class HttpClient:
         if not self._session_mgr:
             return headers
         try:
+            # One-time hydration from global auth_data.json per domain
+            host = host_of(url)
+            if host and host not in self._auth_store_hydrated:
+                try:
+                    from .auth_store import read_auth, is_auth_still_valid
+                except Exception:
+                    from auth_store import read_auth, is_auth_still_valid
+                try:
+                    data = read_auth()
+                    if data and is_auth_still_valid(data):
+                        cookies = data.get("cookies") or []
+                        bearer = data.get("bearer") or data.get("token")
+                        csrf = data.get("csrf")
+                        storage = data.get("storage")
+                        try:
+                            self._session_mgr.save_domain_session(host, cookies, bearer, csrf, storage)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                try:
+                    self._auth_store_hydrated.add(host)
+                except Exception:
+                    pass
             # Attach per-domain cookies/bearer to the request headers
             return self._session_mgr.attach_session(url, headers)
         except Exception:
@@ -134,6 +160,26 @@ class HttpClient:
         if not self._session_mgr:
             return False
         try:
+            # Prefer saved auth_data.json; validate via expiry or lightweight probe
+            try:
+                from .auth_store import read_auth, is_auth_still_valid, probe_auth_valid
+            except Exception:
+                from auth_store import read_auth, is_auth_still_valid, probe_auth_valid
+            data = read_auth()
+            if data and is_auth_still_valid(data):
+                ok, _ = await probe_auth_valid(self, url, data)
+                if ok:
+                    try:
+                        host = host_of(url)
+                        cookies = data.get("cookies") or []
+                        bearer = data.get("bearer") or data.get("token")
+                        csrf = data.get("csrf")
+                        storage = data.get("storage")
+                        self._session_mgr.save_domain_session(host, cookies, bearer, csrf, storage)
+                        self._auth_store_hydrated.add(host)
+                    except Exception:
+                        pass
+                    return True
             # Block until authentication succeeds so scanning continues authenticated
             return bool(self._session_mgr.ensure_logged_in(url))
         except Exception:
