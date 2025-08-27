@@ -9,6 +9,8 @@ except Exception:
 
 import logging
 import re
+import json
+import os
 from urllib.parse import urlparse
 
 log = logging.getLogger("session")
@@ -169,37 +171,118 @@ class SessionManager:
             self.add_identity(Identity(name=name, base_headers=base_headers, cookie=cookie, auth_bearer=bearer, role=role, user_id=user_id, tenant_id=tenant_id))
 
     # ---- Per-domain sessions (cookie/bearer) ----
-    def load_domain_session(self, domain: str) -> Dict[str, object]:
-        import json, os
-        if domain in self._domain_sessions:
-            return self._domain_sessions[domain]
-        path = self._session_path(domain)
-        if not path or not os.path.exists(path):
-            self._domain_sessions[domain] = {"cookies": [], "bearer": None, "csrf": None, "storage": None}
-            return self._domain_sessions[domain]
+    def validate_and_refresh_session(self, domain_or_url: str) -> bool:
+        """Validate existing session and refresh if needed.
+        
+        Returns True if a valid session exists after this call.
+        """
+        # First check if we have any session data
+        if self.has_valid_session(domain_or_url):
+            try:
+                print(f"✅ Session validated for {domain_or_url}")
+            except Exception:
+                pass
+            return True
+        
+        # Try to load from global auth store and hydrate
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f) or {}
-            cookies = data.get("cookies") or []
-            bearer = data.get("bearer")
-            csrf = data.get("csrf")
-            storage = data.get("storage") or None
-            self._domain_sessions[domain] = {"cookies": cookies, "bearer": bearer, "csrf": csrf, "storage": storage}
+            from .auth_store import read_auth, is_auth_still_valid
         except Exception:
-            self._domain_sessions[domain] = {"cookies": [], "bearer": None, "csrf": None, "storage": None}
-        return self._domain_sessions[domain]
-
-    def save_domain_session(self, domain: str, cookies: list, bearer: Optional[str] = None, csrf: Optional[str] = None, storage: Optional[dict] = None):
-        import json, os
-        self._domain_sessions[domain] = {"cookies": cookies or [], "bearer": bearer, "csrf": csrf, "storage": storage}
-        path = self._session_path(domain)
-        if not path:
-            return
+            from auth_store import read_auth, is_auth_still_valid
+        
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(self._domain_sessions[domain], f, indent=2)
+            data = read_auth(self._auth_store_path)
+            if data and is_auth_still_valid(data):
+                # Hydrate per-domain cache
+                dom = domain_or_url
+                try:
+                    if "://" in domain_or_url:
+                        dom = self._hostname_from_url(domain_or_url) or ""
+                except Exception:
+                    pass
+                if dom:
+                    try:
+                        cookies = data.get("cookies") or []
+                        bearer = data.get("bearer") or data.get("token")
+                        csrf = data.get("csrf")
+                        storage = data.get("storage")
+                        self.save_domain_session(dom, cookies, bearer, csrf, storage)
+                        try:
+                            print(f"✅ Session loaded from global store for {dom}")
+                        except Exception:
+                            pass
+                        return True
+                    except Exception:
+                        pass
         except Exception:
             pass
+        
+        # If no valid session found, trigger login
+        return self.ensure_logged_in(domain_or_url)
+
+    def load_domain_session(self, domain: str) -> Dict[str, object]:
+        """Load session data for a domain, with improved fallback logic."""
+        if not domain:
+            return {}
+        
+        # Try to load from sessions directory first
+        try:
+            if self._sessions_dir:
+                session_file = f"{self._sessions_dir}/{domain}.json"
+                if os.path.exists(session_file):
+                    with open(session_file, "r", encoding="utf-8") as f:
+                        data = json.load(f) or {}
+                        # Ensure we have the expected structure
+                        if not isinstance(data.get("cookies"), list):
+                            data["cookies"] = []
+                        return data
+        except Exception:
+            pass
+        
+        # Fallback to global auth store
+        try:
+            from .auth_store import read_auth
+        except Exception:
+            from auth_store import read_auth
+        
+        try:
+            data = read_auth(self._auth_store_path)
+            if data:
+                # Return a copy to avoid modifying the global store
+                return {
+                    "cookies": data.get("cookies") or [],
+                    "bearer": data.get("bearer") or data.get("token"),
+                    "csrf": data.get("csrf"),
+                    "storage": data.get("storage")
+                }
+        except Exception:
+            pass
+        
+        return {}
+
+    def save_domain_session(self, domain: str, cookies: list, bearer: Optional[str] = None, csrf: Optional[str] = None, storage: Optional[dict] = None):
+        """Save session data for a domain with improved persistence."""
+        if not domain:
+            return
+        
+        # Update in-memory cache
+        self._domain_sessions[domain] = {
+            "cookies": cookies or [],
+            "bearer": bearer,
+            "csrf": csrf,
+            "storage": storage
+        }
+        
+        # Save to sessions directory
+        try:
+            if self._sessions_dir:
+                session_file = f"{self._sessions_dir}/{domain}.json"
+                os.makedirs(os.path.dirname(session_file), exist_ok=True)
+                with open(session_file, "w", encoding="utf-8") as f:
+                    json.dump(self._domain_sessions[domain], f, indent=2)
+        except Exception:
+            pass
+        
         # Update aggregate sessions/session.json (for debugging and reuse)
         try:
             if self._aggregate_path and self._sessions_dir:
@@ -446,6 +529,8 @@ class SessionManager:
                 return True
         except Exception:
             pass
+        
+        # Check per-domain session
         dom = domain_or_url
         try:
             if "://" in domain_or_url:
@@ -455,28 +540,26 @@ class SessionManager:
         if not dom:
             return False
         sess = self.load_domain_session(dom)
+        
+        # Check for any valid cookies (not just auth-specific ones)
         try:
-            # Only count auth-like cookies to avoid false positives
-            auth_names = [
-                "sessionid", "session_id", "session", "_session", "sid", "connect.sid",
-                "auth", "auth_token", "token", "jwt", "access_token"
-            ]
             cookies = sess.get("cookies") or []
-            for c in cookies:
-                if not self._cookie_is_valid(c):
-                    continue
-                name = str(c.get("name") or "").lower()
-                if not name:
-                    continue
-                if name in auth_names or any(n in name for n in auth_names):
-                    return True
+            if cookies:
+                # Check if any cookie is valid (not expired)
+                for c in cookies:
+                    if self._cookie_is_valid(c):
+                        # If we have any valid cookie, consider session valid
+                        return True
         except Exception:
             pass
+        
+        # Check for bearer token
         try:
             if isinstance(sess.get("bearer"), str) and sess.get("bearer"):
                 return True
         except Exception:
             pass
+        
         return False
 
     def ensure_logged_in(self, domain_or_url: str) -> bool:
@@ -486,34 +569,52 @@ class SessionManager:
         # Short-circuit in offline/CI mode
         if not self._enable_semi_auto_login:
             return False
-        # If global auth store is valid, skip browser entirely
+        
+        # Check if we already have a valid session
         if self.has_valid_session(domain_or_url):
             try:
-                print("Reusing saved auth_data.json; skipping browser login")
+                print(f"✅ Reusing existing session for {domain_or_url}")
             except Exception:
                 pass
             return True
+        
         # Bounded retries with overall timeout to avoid infinite loops
         attempts = 0
         deadline = self._now() + max(self._login_timeout_seconds, self._overall_login_timeout_seconds)
         while (attempts < self._max_login_retries) and (self._now() < deadline) and not self.has_valid_session(domain_or_url):
             attempts += 1
             try:
-                print(f"Attempt {attempts}/{self._max_login_retries}: Opening browser for login...")
+                print(f"🔐 Attempt {attempts}/{self._max_login_retries}: Opening browser for login...")
             except Exception:
                 pass
             ok = self.open_browser_login(domain_or_url)
             if self.has_valid_session(domain_or_url):
+                try:
+                    print(f"✅ Login successful! Session saved for {domain_or_url}")
+                except Exception:
+                    pass
                 return True
             # Feedback after failed attempt
             if not ok:
                 try:
                     remaining = max(0, int(deadline - self._now()))
-                    print(f"Login not detected yet. {remaining}s left; will retry if attempts remain...")
+                    print(f"⚠️  Login not detected yet. {remaining}s left; will retry if attempts remain...")
                 except Exception:
                     pass
+        
         # Final check
-        return self.has_valid_session(domain_or_url)
+        if self.has_valid_session(domain_or_url):
+            try:
+                print(f"✅ Session validated for {domain_or_url}")
+            except Exception:
+                pass
+            return True
+        else:
+            try:
+                print(f"❌ Failed to establish valid session for {domain_or_url}")
+            except Exception:
+                pass
+            return False
 
     def prelogin_targets(self, targets: List[str]):
         """Open a browser for each unique domain to let the user log in once per run.
@@ -535,28 +636,36 @@ class SessionManager:
             try:
                 # Only open browser when session missing/expired
                 if not self.has_valid_session(dom):
+                    try:
+                        print(f"🔐 [{dom}] Login required. Starting browser...")
+                    except Exception:
+                        pass
                     attempts = 0
                     deadline = self._now() + max(self._login_timeout_seconds, self._overall_login_timeout_seconds)
                     while (attempts < self._max_login_retries) and (self._now() < deadline) and not self.has_valid_session(dom):
                         attempts += 1
                         try:
-                            print(f"[{dom}] Login required. Attempt {attempts}/{self._max_login_retries}...")
+                            print(f"[{dom}] Login attempt {attempts}/{self._max_login_retries}...")
                         except Exception:
                             pass
                         ok = self.open_browser_login(dom)
                         if self.has_valid_session(dom):
+                            try:
+                                print(f"✅ [{dom}] Login successful! Session saved.")
+                            except Exception:
+                                pass
                             break
                         if not ok:
                             try:
                                 remaining = max(0, int(deadline - self._now()))
-                                print(f"[{dom}] Still waiting for login... {remaining}s remaining")
+                                print(f"⚠️  [{dom}] Still waiting for login... {remaining}s remaining")
                             except Exception:
                                 pass
                         if not self._enable_semi_auto_login:
                             break
                 else:
                     try:
-                        print(f"Reusing existing session for {dom}")
+                        print(f"✅ [{dom}] Reusing existing session")
                     except Exception:
                         pass
             except Exception:
@@ -572,7 +681,7 @@ class SessionManager:
         try:
             # Log exact message requested
             try:
-                print("Authentication required → Opening browser for manual login...")
+                print("🔐 Authentication required → Opening browser for manual login...")
             except Exception:
                 pass
             target = domain_or_url
@@ -611,7 +720,7 @@ class SessionManager:
                 if domain:
                     self.save_domain_session(domain, cookies, bearer, csrf, storage)
                     try:
-                        print(f"[debug] Session saved for {domain}")
+                        print(f"💾 Session data saved for {domain}")
                     except Exception:
                         pass
                 # Also persist to global auth_data.json so next runs can skip browser
@@ -633,14 +742,30 @@ class SessionManager:
                         "csrf": csrf,
                         "headers": hdrs,
                         "storage": storage or None,
+                        "captured_at": self._now(),
                         # optional token exp could be set by custom extractors in the future
                     }
                     write_auth(data, self._auth_store_path)
+                    try:
+                        print(f"💾 Global session data saved to {self._auth_store_path}")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    try:
+                        print(f"⚠️  Failed to save global session: {e}")
+                    except Exception:
+                        pass
+                return True
+            else:
+                try:
+                    print("⚠️  No session data captured from browser")
                 except Exception:
                     pass
-                return True
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                print(f"❌ Browser login failed: {e}")
+            except Exception:
+                pass
         return False
 
     def load_session(self, domain: str) -> Dict[str, object]:
@@ -657,6 +782,86 @@ class SessionManager:
     def refresh_session(self, domain_or_url: str) -> bool:
         """Re-trigger interactive login to refresh an expired session."""
         return self.open_browser_login(domain_or_url)
+
+    def clear_expired_sessions(self) -> None:
+        """Clear expired sessions from both memory and disk."""
+        try:
+            # Clear expired sessions from memory
+            expired_domains = []
+            for domain, session in self._domain_sessions.items():
+                if not self.has_valid_session(domain):
+                    expired_domains.append(domain)
+            
+            for domain in expired_domains:
+                del self._domain_sessions[domain]
+                try:
+                    print(f"🗑️  Cleared expired session for {domain}")
+                except Exception:
+                    pass
+            
+            # Clear expired sessions from disk
+            if self._sessions_dir:
+                for fname in os.listdir(self._sessions_dir):
+                    if not fname.endswith(".json"):
+                        continue
+                    domain = fname[:-5]
+                    session_file = f"{self._sessions_dir}/{fname}"
+                    try:
+                        with open(session_file, "r", encoding="utf-8") as f:
+                            data = json.load(f) or {}
+                        # Check if session is expired
+                        cookies = data.get("cookies") or []
+                        bearer = data.get("bearer")
+                        if not cookies and not bearer:
+                            # No session data, remove file
+                            os.remove(session_file)
+                            try:
+                                print(f"🗑️  Removed empty session file for {domain}")
+                            except Exception:
+                                pass
+                        else:
+                            # Check if cookies are expired
+                            valid_cookies = [c for c in cookies if self._cookie_is_valid(c)]
+                            if not valid_cookies and not bearer:
+                                os.remove(session_file)
+                                try:
+                                    print(f"🗑️  Removed expired session file for {domain}")
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def get_session_info(self, domain_or_url: str) -> Dict[str, object]:
+        """Get detailed session information for debugging."""
+        dom = domain_or_url
+        try:
+            if "://" in domain_or_url:
+                dom = self._hostname_from_url(domain_or_url) or ""
+        except Exception:
+            pass
+        
+        if not dom:
+            return {}
+        
+        session = self.load_domain_session(dom)
+        info = {
+            "domain": dom,
+            "has_session": bool(session),
+            "cookie_count": len(session.get("cookies") or []),
+            "has_bearer": bool(session.get("bearer")),
+            "has_csrf": bool(session.get("csrf")),
+            "is_valid": self.has_valid_session(domain_or_url)
+        }
+        
+        # Add cookie details
+        cookies = session.get("cookies") or []
+        valid_cookies = [c for c in cookies if self._cookie_is_valid(c)]
+        info["valid_cookies"] = len(valid_cookies)
+        info["expired_cookies"] = len(cookies) - len(valid_cookies)
+        
+        return info
 
     def _hostname_from_url(self, url: str) -> Optional[str]:
         try:

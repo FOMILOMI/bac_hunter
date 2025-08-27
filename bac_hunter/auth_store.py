@@ -88,15 +88,15 @@ def is_auth_still_valid(data: Dict[str, Any]) -> bool:
     # valid if any non-expired auth cookie exists or bearer present and not past optional exp
     try:
         cookies = data.get("cookies") or []
-        for c in cookies:
-            name = str(c.get("name") or "").lower()
-            if not name:
-                continue
-            if name in ("sessionid", "session_id", "session", "_session", "sid", "connect.sid", "auth", "auth_token", "token", "jwt", "access_token") or any(x in name for x in ("session", "sid", "auth", "token", "jwt")):
+        if cookies:
+            # Check if any cookie is valid (not expired)
+            for c in cookies:
                 if _cookie_is_valid(c):
+                    # If we have any valid cookie, consider session valid
                     return True
     except Exception:
         pass
+    
     # bearer exp support
     try:
         bearer = data.get("bearer") or data.get("token")
@@ -111,6 +111,16 @@ def is_auth_still_valid(data: Dict[str, Any]) -> bool:
                 return True
     except Exception:
         pass
+    
+    # Check if we have any headers that might indicate a valid session
+    try:
+        headers = data.get("headers") or {}
+        if headers:
+            # If we have any headers, consider it potentially valid
+            return True
+    except Exception:
+        pass
+    
     return False
 
 
