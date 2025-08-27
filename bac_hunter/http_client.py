@@ -43,6 +43,9 @@ class HttpClient:
         if isinstance(self._rl, AdaptiveRateLimiter):
             self._rl.calibrator = self._cal
         self._waf = WAFDetector() if self.s.enable_waf_detection else None
+        # Connect WAF detector to adaptive rate limiter
+        if isinstance(self._rl, AdaptiveRateLimiter) and self._waf:
+            self._rl.set_waf_detector(self._waf)
         # simple in-memory GET cache for <400 responses (legacy)
         self._cache: Dict[str, tuple[float, httpx.Response]] = {}
         # smart dedup cache (normalized host+path -> last response)
@@ -383,6 +386,29 @@ class HttpClient:
                         log.debug("%s %s -> %s", method.upper(), url, r.status_code)
                     ident = h.get("X-BH-Identity", "unknown")
                     self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
+                    
+                    # Feed adaptive rate limiter with response data for learning
+                    try:
+                        if isinstance(self._rl, AdaptiveRateLimiter):
+                            self._rl.report_response(host, r.status_code, dict(r.headers))
+                    except Exception:
+                        pass
+                    
+                    # Feed WAF detector for analysis
+                    try:
+                        if self._waf:
+                            waf_result = self._waf.analyze_response(url, r.status_code, dict(r.headers), 
+                                                                 getattr(r, 'text', '')[:1000] if hasattr(r, 'text') else '')
+                            if waf_result:
+                                waf_name, danger_level = waf_result
+                                if danger_level > 0.7:
+                                    log.warning(f"High WAF threat detected ({waf_name}): {danger_level:.2f} for {url}")
+                                    # Trigger emergency throttling
+                                    if isinstance(self._rl, AdaptiveRateLimiter) and hasattr(self._rl, '_emergency_throttle'):
+                                        self._rl._emergency_throttle[host] = time.perf_counter() + (danger_level * 60)
+                    except Exception:
+                        pass
+                    
                     # Feed oracle and session manager with observations
                     try:
                         if self._oracle:
