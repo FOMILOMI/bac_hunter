@@ -109,8 +109,44 @@ class SessionManager:
     def _session_path(self, domain: str) -> Optional[str]:
         if not self._sessions_dir:
             return None
-        safe = domain.replace(":", "_")
+        # Sanitize domain name for safe file naming
+        safe = re.sub(r'[^\w\-\.]', '_', domain.lower())
         return f"{self._sessions_dir}/{safe}.json"
+
+    def _is_cookie_for_domain(self, cookie: dict, target_domain: str) -> bool:
+        """Check if a cookie belongs to the target domain."""
+        try:
+            cookie_domain = cookie.get("domain", "").lower()
+            if not cookie_domain:
+                return True  # No domain specified, assume it's for current domain
+            
+            # Remove leading dot if present
+            if cookie_domain.startswith('.'):
+                cookie_domain = cookie_domain[1:]
+            
+            # Check if cookie domain matches target domain
+            if cookie_domain == target_domain.lower():
+                return True
+            
+            # Check if cookie domain is a parent domain (e.g., .example.com for sub.example.com)
+            if target_domain.lower().endswith('.' + cookie_domain):
+                return True
+            
+            return False
+        except Exception:
+            return False
+
+    def _filter_cookies_by_domain(self, cookies: list, target_domain: str) -> list:
+        """Filter cookies to only include those for the target domain."""
+        if not cookies:
+            return []
+        
+        filtered = []
+        for cookie in cookies:
+            if isinstance(cookie, dict) and self._is_cookie_for_domain(cookie, target_domain):
+                filtered.append(cookie)
+        
+        return filtered
 
     def add_identity(self, ident: Identity):
         self._identities[ident.name] = ident
@@ -225,11 +261,11 @@ class SessionManager:
         if not domain:
             return {}
         
-        # Try to load from sessions directory first
+        # Try to load from sessions directory first using consistent file naming
         try:
             if self._sessions_dir:
-                session_file = f"{self._sessions_dir}/{domain}.json"
-                if os.path.exists(session_file):
+                session_file = self._session_path(domain)
+                if session_file and os.path.exists(session_file):
                     with open(session_file, "r", encoding="utf-8") as f:
                         data = json.load(f) or {}
                         # Ensure we have the expected structure
@@ -239,7 +275,7 @@ class SessionManager:
         except Exception:
             pass
         
-        # Fallback to global auth store
+        # Fallback to global auth store only if no domain-specific file exists
         try:
             from .auth_store import read_auth
         except Exception:
@@ -265,21 +301,25 @@ class SessionManager:
         if not domain:
             return
         
+        # Filter cookies to only include those for the target domain
+        filtered_cookies = self._filter_cookies_by_domain(cookies or [], domain)
+        
         # Update in-memory cache
         self._domain_sessions[domain] = {
-            "cookies": cookies or [],
+            "cookies": filtered_cookies,
             "bearer": bearer,
             "csrf": csrf,
             "storage": storage
         }
         
-        # Save to sessions directory
+        # Save to sessions directory using consistent file naming
         try:
             if self._sessions_dir:
-                session_file = f"{self._sessions_dir}/{domain}.json"
-                os.makedirs(os.path.dirname(session_file), exist_ok=True)
-                with open(session_file, "w", encoding="utf-8") as f:
-                    json.dump(self._domain_sessions[domain], f, indent=2)
+                session_file = self._session_path(domain)
+                if session_file:
+                    os.makedirs(os.path.dirname(session_file), exist_ok=True)
+                    with open(session_file, "w", encoding="utf-8") as f:
+                        json.dump(self._domain_sessions[domain], f, indent=2)
         except Exception:
             pass
         
@@ -434,16 +474,22 @@ class SessionManager:
                     if '=' in kv:
                         name, val = kv.split('=', 1)
                         if name and val:
-                            # Upsert cookie by name
+                            # Create cookie object with domain info
+                            cookie_obj = {
+                                "name": name,
+                                "value": val,
+                                "domain": domain  # Set the domain for filtering
+                            }
+                            # Upsert cookie by name, filtering by domain
                             cookies = sess.get("cookies") or []
                             found = False
                             for c in cookies:
-                                if c.get("name") == name:
+                                if c.get("name") == name and self._is_cookie_for_domain(c, domain):
                                     c["value"] = val
                                     found = True
                                     break
-                            if not found:
-                                cookies.append({"name": name, "value": val})
+                            if not found and self._is_cookie_for_domain(cookie_obj, domain):
+                                cookies.append(cookie_obj)
                             sess["cookies"] = cookies
         except Exception:
             pass
@@ -718,7 +764,9 @@ class SessionManager:
             if cookies or bearer or csrf:
                 domain = self._hostname_from_url(target)
                 if domain:
-                    self.save_domain_session(domain, cookies, bearer, csrf, storage)
+                    # Filter cookies to only include those for the target domain
+                    filtered_cookies = self._filter_cookies_by_domain(cookies or [], domain)
+                    self.save_domain_session(domain, filtered_cookies, bearer, csrf, storage)
                     try:
                         print(f"💾 Session data saved for {domain}")
                     except Exception:
@@ -729,15 +777,16 @@ class SessionManager:
                 except Exception:
                     from auth_store import write_auth
                 try:
-                    # Build a headers snapshot
-                    cookie_header = self._cookie_header_from_cookies(cookies or [])
+                    # Build a headers snapshot with filtered cookies
+                    filtered_cookies = self._filter_cookies_by_domain(cookies or [], domain or "")
+                    cookie_header = self._cookie_header_from_cookies(filtered_cookies)
                     hdrs = {}
                     if cookie_header:
                         hdrs["Cookie"] = cookie_header
                     if bearer:
                         hdrs["Authorization"] = f"Bearer {bearer}"
                     data = {
-                        "cookies": cookies or [],
+                        "cookies": filtered_cookies,
                         "bearer": bearer,
                         "csrf": csrf,
                         "headers": hdrs,
@@ -804,7 +853,7 @@ class SessionManager:
                 for fname in os.listdir(self._sessions_dir):
                     if not fname.endswith(".json"):
                         continue
-                    domain = fname[:-5]
+                    domain = fname[:-5]  # Remove .json extension
                     session_file = f"{self._sessions_dir}/{fname}"
                     try:
                         with open(session_file, "r", encoding="utf-8") as f:

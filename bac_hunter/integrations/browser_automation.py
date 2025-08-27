@@ -125,14 +125,27 @@ class SeleniumDriver:
 		except Exception:
 			return False
 
-	def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None, dict | None]:
+	def extract_cookies_and_tokens(self, target_domain: str = None) -> tuple[list, str | None, str | None, dict | None]:
 		cookies: list = []
 		bearer: str | None = None
 		csrf: str | None = None
 		storage: dict | None = None
 		try:
 			if self._driver:
-				cookies = self._driver.get_cookies() or []
+				all_cookies = self._driver.get_cookies() or []
+				# Filter cookies by domain if target_domain is provided
+				if target_domain and all_cookies:
+					cookies = []
+					for cookie in all_cookies:
+						cookie_domain = cookie.get("domain", "").lower()
+						if not cookie_domain:
+							cookies.append(cookie)  # No domain specified, include it
+						elif cookie_domain == target_domain.lower():
+							cookies.append(cookie)  # Exact domain match
+						elif target_domain.lower().endswith('.' + cookie_domain.lstrip('.')):
+							cookies.append(cookie)  # Parent domain match
+				else:
+					cookies = all_cookies
 				# Try to read tokens from localStorage/sessionStorage via JS
 				js = r"""
 				(() => {
@@ -487,7 +500,7 @@ class PlaywrightDriver:
 				pass
 			return False
 
-	async def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None, dict | None]:
+	async def extract_cookies_and_tokens(self, target_domain: str = None) -> tuple[list, str | None, str | None, dict | None]:
 		cookies: list = []
 		bearer: str | None = None
 		csrf: str | None = None
@@ -495,7 +508,20 @@ class PlaywrightDriver:
 
 		try:
 			if self._ctx:
-				cookies = await self._ctx.cookies()
+				all_cookies = await self._ctx.cookies()
+				# Filter cookies by domain if target_domain is provided
+				if target_domain and all_cookies:
+					cookies = []
+					for cookie in all_cookies:
+						cookie_domain = cookie.get("domain", "").lower()
+						if not cookie_domain:
+							cookies.append(cookie)  # No domain specified, include it
+						elif cookie_domain == target_domain.lower():
+							cookies.append(cookie)  # Exact domain match
+						elif target_domain.lower().endswith('.' + cookie_domain.lstrip('.')):
+							cookies.append(cookie)  # Parent domain match
+				else:
+					cookies = all_cookies or []
 
 			if self._page:
 				# Extract bearer token
@@ -644,6 +670,15 @@ class InteractiveLogin:
 		if not self._drv:
 			return [], None, None, None
 
+		# Extract domain from URL for cookie filtering
+		target_domain = None
+		try:
+			from urllib.parse import urlparse
+			parsed = urlparse(url)
+			target_domain = parsed.netloc.split(':')[0]  # Remove port if present
+		except Exception:
+			pass
+
 		# Selenium path remains synchronous; run in worker thread to avoid blocking loop
 		if self._driver_kind == "selenium":
 			import asyncio
@@ -657,7 +692,7 @@ class InteractiveLogin:
 					except Exception:
 						login_ok = False
 					if login_ok:
-						cookies, bearer, csrf, storage = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+						cookies, bearer, csrf, storage = self._drv.extract_cookies_and_tokens(target_domain)  # type: ignore[attr-defined]
 						self._drv.close()
 						return cookies, bearer, csrf, storage
 					self._drv.close()
@@ -683,7 +718,7 @@ class InteractiveLogin:
 			except Exception:
 				login_ok = False
 			if login_ok:
-				cookies, bearer, csrf, storage = await self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+				cookies, bearer, csrf, storage = await self._drv.extract_cookies_and_tokens(target_domain)  # type: ignore[attr-defined]
 				await self._drv.close()  # type: ignore[attr-defined]
 				return cookies, bearer, csrf, storage
 			await self._drv.close()  # type: ignore[attr-defined]

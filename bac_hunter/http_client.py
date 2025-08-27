@@ -133,12 +133,20 @@ class HttpClient:
                 try:
                     data = read_auth()
                     if data and is_auth_still_valid(data):
-                        cookies = data.get("cookies") or []
+                        # Filter cookies by domain before saving
+                        all_cookies = data.get("cookies") or []
+                        filtered_cookies = []
+                        for cookie in all_cookies:
+                            if isinstance(cookie, dict):
+                                cookie_domain = cookie.get("domain", "").lower()
+                                if not cookie_domain or cookie_domain == host.lower() or host.lower().endswith('.' + cookie_domain.lstrip('.')):
+                                    filtered_cookies.append(cookie)
+                        
                         bearer = data.get("bearer") or data.get("token")
                         csrf = data.get("csrf")
                         storage = data.get("storage")
                         try:
-                            self._session_mgr.save_domain_session(host, cookies, bearer, csrf, storage)
+                            self._session_mgr.save_domain_session(host, filtered_cookies, bearer, csrf, storage)
                         except Exception:
                             pass
                 except Exception:
@@ -171,11 +179,19 @@ class HttpClient:
                 if ok:
                     try:
                         host = host_of(url)
-                        cookies = data.get("cookies") or []
+                        # Filter cookies by domain before saving
+                        all_cookies = data.get("cookies") or []
+                        filtered_cookies = []
+                        for cookie in all_cookies:
+                            if isinstance(cookie, dict):
+                                cookie_domain = cookie.get("domain", "").lower()
+                                if not cookie_domain or cookie_domain == host.lower() or host.lower().endswith('.' + cookie_domain.lstrip('.')):
+                                    filtered_cookies.append(cookie)
+                        
                         bearer = data.get("bearer") or data.get("token")
                         csrf = data.get("csrf")
                         storage = data.get("storage")
-                        self._session_mgr.save_domain_session(host, cookies, bearer, csrf, storage)
+                        self._session_mgr.save_domain_session(host, filtered_cookies, bearer, csrf, storage)
                         self._auth_store_hydrated.add(host)
                     except Exception:
                         pass
