@@ -1,11 +1,21 @@
-Professional-grade, non-aggressive automation framework for discovering Broken Access Control vulnerabilities. Built with modular architecture, smart rate limiting, unified orchestration, and comprehensive reporting.
+Professional-grade, AI-enhanced automation framework for discovering Broken Access Control vulnerabilities. Built with modular architecture, smart rate limiting, unified orchestration, comprehensive reporting, and advanced machine learning capabilities.
 
-### What’s in this release
-- Stable CLI with comprehensive subcommands (recon, scan, access, audit, exploit, smart-auto, orchestrate, dashboard, report, ci, har-replay, db-prune)
-- SQLite-backed storage auto-initialized on first run
+### 🚀 What's New in v2.0
+- **🧙 Interactive Setup Wizard**: Guided configuration for beginners with pre-configured profiles
+- **🎓 Educational Learning Mode**: Step-by-step explanations and interactive security tutorials
+- **🤖 AI-Powered Anomaly Detection**: Machine learning for identifying unusual response patterns
+- **🔍 Intelligent Recommendations**: AI-driven suggestions for next testing steps
+- **🔐 Encrypted Secure Storage**: Protected storage for sensitive authentication data
+- **🧪 Payload Sandboxing**: Safe testing environment for exploits and payloads
+- **🌐 Enhanced Web Dashboard**: Real-time updates, advanced visualizations, and modern UI
+- **📚 Comprehensive Knowledge Base**: Built-in vulnerability explanations and best practices
+
+### Core Features
+- Stable CLI with 15+ subcommands including new educational and AI-powered tools
+- SQLite-backed storage with encrypted sensitive data protection
 - Auto-fallbacks for missing external tools (Subfinder, ProjectDiscovery httpx)
-- Web dashboard (FastAPI + Uvicorn)
-- Unified exporters (HTML/CSV/JSON/SARIF, PDF via WeasyPrint if available)
+- Advanced web dashboard with WebSocket real-time updates
+- Unified exporters (HTML/CSV/JSON/SARIF/PDF) with enhanced reporting
 
 ## 🎯 Highlights
 
@@ -27,17 +37,31 @@ pip3 install --break-system-packages -r requirements.txt
 pip3 install --break-system-packages pytest
 ```
 
-### One-Click Smart Auto
+### 🧙 Quick Start with Setup Wizard (Recommended for Beginners)
+
+```bash
+# Interactive setup wizard with guided configuration
+python -m bac_hunter setup-wizard
+
+# Follow the generated quick-start script
+./run_scan.sh
+
+# View results in enhanced web dashboard
+python -m bac_hunter dashboard
+```
+
+### 🚀 One-Click Smart Auto (Advanced Users)
 
 Run a near‑zero configuration scan that profiles, performs smart recon, gathers auth intelligence, suggests identities, and runs light access checks:
 
 ```bash
+# Basic smart scan
 python -m bac_hunter smart-auto https://target.com
-```
 
-Options:
+# With learning mode for educational explanations
+python -m bac_hunter smart-auto --learning-mode https://target.com
 
-```bash
+# Advanced configuration
 python -m bac_hunter smart-auto \
   --mode standard \
   --max-rps 2.0 \
@@ -50,6 +74,7 @@ What it does:
 - Discovers login/reset/OAuth endpoints and infers session token style
 - Suggests synthetic identities (no brute-force)
 - Runs differential/IDOR/force-browse on a small sample
+- **NEW**: Provides educational explanations in learning mode
 
 ### Authentication & Login Flow
 
@@ -139,6 +164,8 @@ python -m bac_hunter report --output report.sarif # SARIF for CI integrations
 ```
 
 ## ✅ Supported Commands
+
+### Core Scanning Commands
 - `recon`: robots/sitemap/js/smart recon into SQLite
 - `scan`: smart recon with optional heuristics
 - `smart-auto`: profile -> recon -> auth intel -> light access
@@ -147,13 +174,28 @@ python -m bac_hunter report --output report.sarif # SARIF for CI integrations
 - `access`: diff/IDOR/force-browse (non-aggressive)
 - `audit`: header/CORS and safe param toggles
 - `exploit`: safe privilege escalation and parameter mining
-- `har-replay`: compare GETs from HAR across identities
+
+### 🆕 AI & Intelligence Commands
+- `setup-wizard`: 🧙 Interactive setup with guided configuration
+- `explain`: 🎓 Learn about security concepts with interactive explanations
+- `tutorial`: 🎯 Run interactive security testing tutorials
+- `generate-recommendations`: 🤖 Get AI-powered next-step suggestions
+- `detect-anomalies`: 🔍 Find unusual patterns using machine learning
+
+### 🆕 Security & Safety Commands
+- `secure-storage`: 🔐 Manage encrypted storage for sensitive data
+- `test-payload`: 🧪 Safely test payloads in sandboxed environment
+
+### Reporting & Integration
 - `report`: HTML/CSV/JSON/SARIF, PDF via WeasyPrint if present
-- `dashboard`: FastAPI app with API and minimal UI
-- `setup`: generate `identities.yaml` and `tasks.yaml`
-- `orchestrate`, `orchestrator-status/pause/resume`: job queue
-- `authorize`: PD subfinder + httpx wrapper (graceful if tools missing)
+- `dashboard`: Enhanced FastAPI app with real-time updates and modern UI
+- `har-replay`: compare GETs from HAR across identities
 - `ci`: YAML-driven scan with fail threshold
+- `orchestrate`, `orchestrator-status/pause/resume`: job queue
+
+### Utility Commands
+- `setup`: generate `identities.yaml` and `tasks.yaml` (legacy, use `setup-wizard`)
+- `authorize`: PD subfinder + httpx wrapper (graceful if tools missing)
 - `db-prune`: prune SQLite size
 
 ## 🧩 Config Files

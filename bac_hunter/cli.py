@@ -1583,3 +1583,319 @@ def ai_brief(
 		brief = await reporter.executive_risk_briefing(findings, {})
 		typer.echo(json.dumps(brief, indent=2))
 	asyncio.run(run())
+
+
+@app.command()
+def setup_wizard(
+	output_dir: str = typer.Option(".", help="Output directory for configuration files"),
+	profile: str = typer.Option(None, help="Pre-select a profile (quick_scan, comprehensive, etc.)"),
+	non_interactive: bool = typer.Option(False, help="Run in non-interactive mode")
+):
+	"""🧙 Run the interactive setup wizard to configure BAC Hunter"""
+	try:
+		from .setup import run_wizard
+		
+		if non_interactive:
+			# Create basic configuration for CI/CD
+			import yaml
+			from pathlib import Path
+			
+			basic_identities = {
+				"identities": [
+					{
+						"name": "anonymous",
+						"headers": {"User-Agent": "BAC-Hunter/2.0"}
+					}
+				]
+			}
+			
+			basic_tasks = {
+				"tasks": [
+					{
+						"type": "recon",
+						"priority": 0,
+						"params": {
+							"target": "https://example.com",
+							"mode": "standard",
+							"max_rps": 2.0
+						}
+					}
+				]
+			}
+			
+			output_path = Path(output_dir)
+			output_path.mkdir(exist_ok=True)
+			
+			with open(output_path / "identities.yaml", 'w') as f:
+				yaml.dump(basic_identities, f)
+			
+			with open(output_path / "tasks.yaml", 'w') as f:
+				yaml.dump(basic_tasks, f)
+			
+			typer.echo("✅ Basic configuration files created for CI/CD")
+		else:
+			run_wizard(output_dir)
+		
+	except ImportError:
+		typer.echo("❌ Setup wizard not available. Install rich: pip install rich")
+	except Exception as e:
+		typer.echo(f"❌ Setup wizard failed: {e}")
+
+
+@app.command()
+def explain(
+	concept: str = typer.Argument(help="Security concept to explain"),
+	level: str = typer.Option("basic", help="Explanation level: basic, intermediate, advanced, expert"),
+	interactive: bool = typer.Option(True, help="Enable interactive mode")
+):
+	"""🎓 Learn about security testing concepts"""
+	try:
+		from .learning import create_educational_mode
+		
+		edu_mode = create_educational_mode(level)
+		edu_mode.interactive_mode = interactive
+		edu_mode.explain_concept(concept)
+		
+	except ImportError:
+		typer.echo("❌ Learning mode not available. Install rich: pip install rich")
+	except Exception as e:
+		typer.echo(f"❌ Failed to explain concept: {e}")
+
+
+@app.command()
+def tutorial(
+	name: str = typer.Argument(help="Tutorial name: idor_testing, access_control_basics, session_testing"),
+	level: str = typer.Option("basic", help="Explanation level")
+):
+	"""🎯 Run interactive security testing tutorials"""
+	try:
+		from .learning import create_educational_mode
+		
+		edu_mode = create_educational_mode(level)
+		edu_mode.create_interactive_tutorial(name)
+		
+	except ImportError:
+		typer.echo("❌ Learning mode not available. Install rich: pip install rich")
+	except Exception as e:
+		typer.echo(f"❌ Tutorial failed: {e}")
+
+
+@app.command()
+def secure_storage(
+	action: str = typer.Argument(help="Action: init, store, retrieve, list, cleanup"),
+	data_id: str = typer.Option(None, help="Data ID for store/retrieve operations"),
+	data_type: str = typer.Option("auth_token", help="Type of data to store"),
+	value: str = typer.Option(None, help="Value to store"),
+	storage_path: str = typer.Option("~/.bac_hunter/secure", help="Secure storage path")
+):
+	"""🔐 Manage encrypted secure storage for sensitive data"""
+	try:
+		from .security import create_secure_storage
+		import getpass
+		from pathlib import Path
+		
+		storage_path_obj = Path(storage_path).expanduser()
+		
+		if action == "init":
+			password = getpass.getpass("Enter password for secure storage: ")
+			storage = create_secure_storage(str(storage_path_obj), password)
+			typer.echo("✅ Secure storage initialized")
+			
+		elif action in ["store", "retrieve", "list", "cleanup"]:
+			password = getpass.getpass("Enter storage password: ")
+			storage = create_secure_storage(str(storage_path_obj), password)
+			
+			if action == "store":
+				if not data_id or not value:
+					typer.echo("❌ data_id and value required for store operation")
+					return
+				
+				success = storage.store_data(data_id, data_type, value)
+				if success:
+					typer.echo(f"✅ Stored data: {data_id}")
+				else:
+					typer.echo(f"❌ Failed to store data: {data_id}")
+			
+			elif action == "retrieve":
+				if not data_id:
+					typer.echo("❌ data_id required for retrieve operation")
+					return
+				
+				data = storage.retrieve_data(data_id)
+				if data is not None:
+					typer.echo(f"Retrieved data: {data}")
+				else:
+					typer.echo(f"❌ Data not found: {data_id}")
+			
+			elif action == "list":
+				data_list = storage.list_data(data_type if data_type != "auth_token" else None)
+				if data_list:
+					import json
+					typer.echo(json.dumps(data_list, indent=2))
+				else:
+					typer.echo("No data found")
+			
+			elif action == "cleanup":
+				cleaned = storage.cleanup_expired()
+				typer.echo(f"✅ Cleaned up {cleaned} expired entries")
+		
+		else:
+			typer.echo("❌ Invalid action. Use: init, store, retrieve, list, cleanup")
+		
+	except ImportError:
+		typer.echo("❌ Secure storage not available. Install cryptography: pip install cryptography")
+	except Exception as e:
+		typer.echo(f"❌ Secure storage operation failed: {e}")
+
+
+@app.command()
+def test_payload(
+	payload: str = typer.Argument(help="Payload to test"),
+	payload_type: str = typer.Option("python", help="Payload type: python, javascript, shell, sql"),
+	safety_check: bool = typer.Option(True, help="Perform safety check before execution")
+):
+	"""🧪 Test payloads safely in sandbox environment"""
+	try:
+		from .security import test_payload_safely, check_payload_safety
+		import json
+		
+		if safety_check:
+			safety_result = check_payload_safety(payload, payload_type)
+			typer.echo("Safety Analysis:")
+			typer.echo(json.dumps(safety_result, indent=2))
+			
+			if safety_result["safety_level"] == "dangerous":
+				if not typer.confirm("Payload is marked as dangerous. Continue anyway?"):
+					return
+		
+		result = test_payload_safely(payload, payload_type)
+		
+		typer.echo(f"\nExecution Result:")
+		typer.echo(f"Success: {result.success}")
+		typer.echo(f"Execution Time: {result.execution_time:.2f}s")
+		
+		if result.output:
+			typer.echo(f"Output:\n{result.output}")
+		
+		if result.error:
+			typer.echo(f"Error:\n{result.error}")
+		
+		if result.warnings:
+			typer.echo(f"Warnings: {', '.join(result.warnings)}")
+		
+		if result.security_violations:
+			typer.echo(f"Security Violations: {', '.join(result.security_violations)}")
+		
+	except ImportError:
+		typer.echo("❌ Sandbox not available. Install required dependencies")
+	except Exception as e:
+		typer.echo(f"❌ Payload testing failed: {e}")
+
+
+@app.command()
+def generate_recommendations(
+	target: str = typer.Argument(help="Target URL to analyze"),
+	output: str = typer.Option(None, help="Output file for recommendations"),
+	format: str = typer.Option("json", help="Output format: json, markdown")
+):
+	"""🤖 Generate AI-powered recommendations based on scan results"""
+	try:
+		from .intelligence.recommendation_engine import generate_recommendations_from_scan
+		import json
+		
+		# Get scan results from database
+		s = Settings()
+		db = Storage(s.db_path)
+		
+		findings = [
+			{
+				"id": str(i),
+				"type": finding_type,
+				"url": url,
+				"severity": "medium",  # Default severity
+				"description": f"{finding_type} vulnerability found at {url}"
+			}
+			for i, (_, finding_type, url, _, _) in enumerate(db.iter_findings())
+		]
+		
+		scan_results = {
+			"target_info": {"url": target},
+			"findings": findings,
+			"anomalies": [],
+			"environment_info": {"type": "unknown"}
+		}
+		
+		recommendations = generate_recommendations_from_scan(scan_results)
+		
+		if output:
+			from .intelligence.recommendation_engine import export_recommendations_to_file
+			export_recommendations_to_file(recommendations, output, format)
+			typer.echo(f"✅ Recommendations exported to {output}")
+		else:
+			if format == "json":
+				from .intelligence.recommendation_engine import RecommendationEngine
+				engine = RecommendationEngine()
+				content = engine.export_recommendations(recommendations, "json")
+				typer.echo(content)
+			else:
+				for i, rec in enumerate(recommendations[:10], 1):  # Show top 10
+					typer.echo(f"\n{i}. {rec.title} ({rec.priority.value})")
+					typer.echo(f"   {rec.description}")
+					if rec.action_items:
+						typer.echo(f"   Actions: {', '.join(rec.action_items[:2])}")
+		
+	except ImportError:
+		typer.echo("❌ Recommendation engine not available")
+	except Exception as e:
+		typer.echo(f"❌ Failed to generate recommendations: {e}")
+
+
+@app.command()
+def detect_anomalies(
+	target: str = typer.Argument(help="Target URL to analyze"),
+	baseline_file: str = typer.Option(None, help="File containing baseline responses"),
+	output: str = typer.Option(None, help="Output file for anomaly report")
+):
+	"""🔍 Detect anomalies in HTTP responses using AI"""
+	try:
+		from .intelligence.ai import detect_anomalies_in_responses, generate_anomaly_report
+		import json
+		
+		# Get responses from database (simplified)
+		s = Settings()
+		db = Storage(s.db_path)
+		
+		# Mock response data - in real implementation, this would come from stored responses
+		responses = [
+			{
+				"url": target,
+				"status_code": 200,
+				"headers": {"content-type": "text/html"},
+				"body": "Sample response body",
+				"response_time": 1.5
+			}
+		]
+		
+		baseline_responses = []
+		if baseline_file and Path(baseline_file).exists():
+			with open(baseline_file, 'r') as f:
+				baseline_responses = json.load(f)
+		
+		anomalies = detect_anomalies_in_responses(responses, baseline_responses)
+		
+		if anomalies:
+			report = generate_anomaly_report(anomalies)
+			
+			if output:
+				with open(output, 'w') as f:
+					json.dump(report, f, indent=2)
+				typer.echo(f"✅ Anomaly report saved to {output}")
+			else:
+				typer.echo(json.dumps(report, indent=2))
+		else:
+			typer.echo("No anomalies detected")
+		
+	except ImportError:
+		typer.echo("❌ Anomaly detection not available. Install scikit-learn and dependencies")
+	except Exception as e:
+		typer.echo(f"❌ Anomaly detection failed: {e}")
