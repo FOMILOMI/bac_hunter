@@ -123,16 +123,16 @@ class HttpClient:
         if not self._session_mgr:
             return headers
         try:
-            # One-time hydration from global auth_data.json per domain
+            # ALWAYS check global auth store for latest auth data
             host = host_of(url)
-            if host and host not in self._auth_store_hydrated:
+            if host:
                 try:
-                    from .auth_store import read_auth, is_auth_still_valid
+                    from .auth_store import read_auth, is_auth_still_valid, has_auth_data
                 except Exception:
-                    from auth_store import read_auth, is_auth_still_valid
+                    from auth_store import read_auth, is_auth_still_valid, has_auth_data
                 try:
                     data = read_auth()
-                    if data and is_auth_still_valid(data):
+                    if data and has_auth_data(data) and is_auth_still_valid(data):
                         # Filter cookies to this host only to prevent cross-site bleed
                         try:
                             from .session_manager import SessionManager  # type: ignore
@@ -144,6 +144,7 @@ class HttpClient:
                         csrf = data.get("csrf")
                         storage = data.get("storage")
                         try:
+                            # Always update domain session with latest global data
                             self._session_mgr.save_domain_session(host, cookies, bearer, csrf, storage)
                         except Exception:
                             pass
@@ -166,27 +167,51 @@ class HttpClient:
         if not self._session_mgr:
             return False
         try:
-            # Prefer saved auth_data.json; validate via expiry or lightweight probe
+            # Check if we already have valid auth data before prompting
             try:
-                from .auth_store import read_auth, is_auth_still_valid, probe_auth_valid
+                from .auth_store import read_auth, is_auth_still_valid, has_auth_data, probe_auth_valid
             except Exception:
-                from auth_store import read_auth, is_auth_still_valid, probe_auth_valid
+                from auth_store import read_auth, is_auth_still_valid, has_auth_data, probe_auth_valid
+            
             data = read_auth()
-            if data and is_auth_still_valid(data):
-                ok, _ = await probe_auth_valid(self, url, data)
-                if ok:
+            if data and has_auth_data(data):
+                if is_auth_still_valid(data):
+                    # Double-check with probe to ensure auth is really invalid
+                    ok, probe_status = await probe_auth_valid(self, url, data, retry_on_failure=True)
+                    if ok:
+                        try:
+                            host = host_of(url)
+                            cookies = data.get("cookies") or []
+                            bearer = data.get("bearer") or data.get("token")
+                            csrf = data.get("csrf")
+                            storage = data.get("storage")
+                            self._session_mgr.save_domain_session(host, cookies, bearer, csrf, storage)
+                            self._auth_store_hydrated.add(host)
+                            if self.s.verbosity != "results":
+                                log.info("✅ Auth probe succeeded (%s), reusing existing session for %s", probe_status, url)
+                        except Exception:
+                            pass
+                        return True
+                    else:
+                        try:
+                            if self.s.verbosity != "results":
+                                log.info("❌ Auth probe failed (%s), proceeding with fresh login for %s", probe_status, url)
+                        except Exception:
+                            pass
+                else:
                     try:
-                        host = host_of(url)
-                        cookies = data.get("cookies") or []
-                        bearer = data.get("bearer") or data.get("token")
-                        csrf = data.get("csrf")
-                        storage = data.get("storage")
-                        self._session_mgr.save_domain_session(host, cookies, bearer, csrf, storage)
-                        self._auth_store_hydrated.add(host)
+                        if self.s.verbosity != "results":
+                            log.info("⏰ Stored auth data appears expired, proceeding with fresh login for %s", url)
                     except Exception:
                         pass
-                    return True
-            # Block until authentication succeeds so scanning continues authenticated
+            else:
+                try:
+                    if self.s.verbosity != "results":
+                        log.info("🔐 No stored auth data found, proceeding with fresh login for %s", url)
+                except Exception:
+                    pass
+            
+            # Only proceed with interactive login if validation confirms it's needed
             return bool(self._session_mgr.ensure_logged_in(url))
         except Exception:
             return False
@@ -369,7 +394,7 @@ class HttpClient:
                             self._session_mgr.process_response(url, r)
                     except Exception:
                         pass
-                    # If auth is required (401/403 or redirect to login), try silent refresh, else interactive
+                    # Smart auth error handling: distinguish between actual auth failure and WAF/permission issues
                     try:
                         requires_auth = False
                         if self._session_mgr and hasattr(self._session_mgr, "check_auth_required"):
@@ -378,21 +403,71 @@ class HttpClient:
                             requires_auth = r.status_code in (401, 403)
                     except Exception:
                         requires_auth = r.status_code in (401, 403)
+                    
                     if requires_auth and attempt == 0:
-                        did_refresh = await self._silent_refresh(url)
-                        if not did_refresh and self.s.enable_semi_auto_login:
-                            did_refresh = await self._maybe_prompt_for_login(url)
-                        if did_refresh:
-                            # Inject updated session and retry immediately
-                            h = self._inject_domain_session(url, h)
-                            r = await self._client.request(method, url, headers=h, data=data, json=json)
-                            elapsed_ms = (time.perf_counter() - start) * 1000.0
-                            self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
-                            try:
-                                if self._oracle:
-                                    self._oracle.observe_response(url, r)
-                            except Exception:
-                                pass
+                        # Before attempting login, validate if stored auth data is actually invalid
+                        should_attempt_refresh = False
+                        try:
+                            from .auth_store import read_auth, is_auth_still_valid, has_auth_data, probe_auth_valid
+                        except Exception:
+                            from auth_store import read_auth, is_auth_still_valid, has_auth_data, probe_auth_valid
+                        
+                        try:
+                            data = read_auth()
+                            if data and has_auth_data(data):
+                                if is_auth_still_valid(data):
+                                    # Auth data appears valid, probe to confirm it's actually invalid
+                                    is_valid, probe_status = await probe_auth_valid(self, url, data, retry_on_failure=True)
+                                    if not is_valid:
+                                        # Confirmed: auth data is invalid, attempt refresh
+                                        should_attempt_refresh = True
+                                        try:
+                                            if self.s.verbosity != "results":
+                                                log.info("🔄 Auth probe confirmed invalid session (%s), attempting refresh for %s", probe_status, url)
+                                        except Exception:
+                                            pass
+                                    else:
+                                        # Auth data is valid, this is likely a WAF/permission issue, not auth failure
+                                        try:
+                                            if self.s.verbosity != "results":
+                                                log.info("⚠️ Got %s but auth probe succeeded (%s) - likely WAF/permission issue, continuing with same session for %s", r.status_code, probe_status, url)
+                                        except Exception:
+                                            pass
+                                else:
+                                    # Auth data appears expired, attempt refresh
+                                    should_attempt_refresh = True
+                                    try:
+                                        if self.s.verbosity != "results":
+                                            log.info("🔄 Auth data appears expired, attempting refresh for %s", url)
+                                    except Exception:
+                                        pass
+                            else:
+                                # No auth data available, attempt fresh login
+                                should_attempt_refresh = True
+                                try:
+                                    if self.s.verbosity != "results":
+                                        log.info("🔄 No auth data available, attempting fresh login for %s", url)
+                                except Exception:
+                                    pass
+                        except Exception:
+                            # On error, fall back to attempting refresh
+                            should_attempt_refresh = True
+                        
+                        if should_attempt_refresh:
+                            did_refresh = await self._silent_refresh(url)
+                            if not did_refresh and self.s.enable_semi_auto_login:
+                                did_refresh = await self._maybe_prompt_for_login(url)
+                            if did_refresh:
+                                # Inject updated session and retry immediately
+                                h = self._inject_domain_session(url, h)
+                                r = await self._client.request(method, url, headers=h, data=data, json=json)
+                                elapsed_ms = (time.perf_counter() - start) * 1000.0
+                                self._record(url, method.upper(), r.status_code, elapsed_ms, len(r.content), ident)
+                                try:
+                                    if self._oracle:
+                                        self._oracle.observe_response(url, r)
+                                except Exception:
+                                    pass
                     if self._waf is not None:
                         try:
                             body_sample = r.text[:512] if r.headers.get("content-type","" ).lower().startswith("text/") else ""

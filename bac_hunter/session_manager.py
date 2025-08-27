@@ -176,58 +176,92 @@ class SessionManager:
         
         Returns True if a valid session exists after this call.
         """
-        # First check if we have any session data
-        if self.has_valid_session(domain_or_url):
-            try:
-                print(f"✅ Session validated for {domain_or_url}")
-            except Exception:
-                pass
-            return True
-        
-        # Try to load from global auth store and hydrate
+        # ALWAYS start by checking the global auth store first
         try:
-            from .auth_store import read_auth, is_auth_still_valid
+            from .auth_store import read_auth, is_auth_still_valid, has_auth_data
         except Exception:
-            from auth_store import read_auth, is_auth_still_valid
+            from auth_store import read_auth, is_auth_still_valid, has_auth_data
         
         try:
             data = read_auth(self._auth_store_path)
-            if data and is_auth_still_valid(data):
-                # Hydrate per-domain cache
-                dom = domain_or_url
-                try:
-                    if "://" in domain_or_url:
-                        dom = self._hostname_from_url(domain_or_url) or ""
-                except Exception:
-                    pass
-                if dom:
+            if data and has_auth_data(data):
+                # We have auth data, check if it's still valid
+                if is_auth_still_valid(data):
+                    # Hydrate per-domain cache from global store
+                    dom = domain_or_url
                     try:
-                        cookies = self._filter_cookies_for_domain(dom, data.get("cookies") or [])
-                        bearer = data.get("bearer") or data.get("token")
-                        csrf = data.get("csrf")
-                        storage = data.get("storage")
-                        self.save_domain_session(dom, cookies, bearer, csrf, storage)
-                        # Only report success if there is actual domain-relevant auth material
-                        if (bearer and isinstance(bearer, str)) or any(self._cookie_is_valid(c) for c in cookies):
-                            try:
-                                print(f"✅ Session loaded from global store for {dom}")
-                            except Exception:
-                                pass
-                            return True
+                        if "://" in domain_or_url:
+                            dom = self._hostname_from_url(domain_or_url) or ""
+                    except Exception:
+                        pass
+                    
+                    if dom:
+                        try:
+                            cookies = self._filter_cookies_for_domain(dom, data.get("cookies") or [])
+                            bearer = data.get("bearer") or data.get("token")
+                            csrf = data.get("csrf")
+                            storage = data.get("storage")
+                            self.save_domain_session(dom, cookies, bearer, csrf, storage)
+                            # Report success if we have any auth material
+                            if (bearer and isinstance(bearer, str)) or cookies:
+                                try:
+                                    print(f"✅ Session loaded from persistent store for {dom}")
+                                except Exception:
+                                    pass
+                                return True
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        print(f"⚠️ Persistent auth data exists but appears expired for {domain_or_url}")
                     except Exception:
                         pass
         except Exception:
             pass
         
-        # If no valid session found, trigger login
-        return self.ensure_logged_in(domain_or_url)
+        # Fallback: check if we already have a valid per-domain session
+        if self.has_valid_session(domain_or_url):
+            try:
+                print(f"✅ Valid per-domain session found for {domain_or_url}")
+            except Exception:
+                pass
+            return True
+        
+        # If no valid session found, trigger login only if enabled
+        if self._enable_semi_auto_login:
+            return self.ensure_logged_in(domain_or_url)
+        else:
+            try:
+                print(f"❌ No valid session for {domain_or_url} and interactive login disabled")
+            except Exception:
+                pass
+            return False
 
     def load_domain_session(self, domain: str) -> Dict[str, object]:
-        """Load session data for a domain, with improved fallback logic."""
+        """Load session data for a domain, prioritizing global auth store."""
         if not domain:
             return {}
         
-        # Try to load from sessions directory first
+        # ALWAYS try global auth store first for consistency
+        try:
+            from .auth_store import read_auth, has_auth_data
+        except Exception:
+            from auth_store import read_auth, has_auth_data
+        
+        try:
+            data = read_auth(self._auth_store_path)
+            if data and has_auth_data(data):
+                # Return a copy to avoid modifying the global store
+                return {
+                    "cookies": self._filter_cookies_for_domain(domain, data.get("cookies") or []),
+                    "bearer": data.get("bearer") or data.get("token"),
+                    "csrf": data.get("csrf"),
+                    "storage": data.get("storage")
+                }
+        except Exception:
+            pass
+        
+        # Fallback to per-domain sessions directory
         try:
             if self._sessions_dir:
                 session_file = self._session_path(domain) or f"{self._sessions_dir}/{domain}.json"
@@ -240,25 +274,6 @@ class SessionManager:
                         # Scope cookies strictly to this domain
                         data["cookies"] = self._filter_cookies_for_domain(domain, data.get("cookies") or [])
                         return data
-        except Exception:
-            pass
-        
-        # Fallback to global auth store
-        try:
-            from .auth_store import read_auth
-        except Exception:
-            from auth_store import read_auth
-        
-        try:
-            data = read_auth(self._auth_store_path)
-            if data:
-                # Return a copy to avoid modifying the global store
-                return {
-                    "cookies": self._filter_cookies_for_domain(domain, data.get("cookies") or []),
-                    "bearer": data.get("bearer") or data.get("token"),
-                    "csrf": data.get("csrf"),
-                    "storage": data.get("storage")
-                }
         except Exception:
             pass
         
@@ -278,7 +293,35 @@ class SessionManager:
             "storage": storage
         }
         
-        # Save to sessions directory
+        # ALWAYS save to global auth store for persistence across runs
+        try:
+            from .auth_store import write_auth
+        except Exception:
+            from auth_store import write_auth
+        
+        try:
+            # Build a headers snapshot for easy reuse
+            cookie_header = self._cookie_header_from_cookies(filtered_cookies or [])
+            hdrs = {}
+            if cookie_header:
+                hdrs["Cookie"] = cookie_header
+            if bearer:
+                hdrs["Authorization"] = f"Bearer {bearer}"
+            if csrf:
+                hdrs["X-CSRF-Token"] = csrf
+            
+            global_data = {
+                "cookies": filtered_cookies or [],
+                "bearer": bearer,
+                "csrf": csrf,
+                "headers": hdrs,
+                "storage": storage
+            }
+            write_auth(global_data, self._auth_store_path)
+        except Exception:
+            pass
+        
+        # Save to sessions directory for backward compatibility
         try:
             if self._sessions_dir:
                 session_file = self._session_path(domain) or f"{self._sessions_dir}/{domain}.json"
@@ -509,14 +552,15 @@ class SessionManager:
     # ---- Interactive pre-login helpers ----
     def has_valid_session(self, domain_or_url: str) -> bool:
         """Check if we have any non-expired cookie or a bearer token for the domain."""
-        # Prefer global auth store if present and valid; hydrate per-domain cache lazily
+        # ALWAYS check global auth store first
         try:
-            from .auth_store import read_auth, is_auth_still_valid
+            from .auth_store import read_auth, is_auth_still_valid, has_auth_data
         except Exception:
-            from auth_store import read_auth, is_auth_still_valid
+            from auth_store import read_auth, is_auth_still_valid, has_auth_data
+        
         try:
             data = read_auth(self._auth_store_path)
-            if data and is_auth_still_valid(data):
+            if data and has_auth_data(data) and is_auth_still_valid(data):
                 # Hydrate per-domain cache so subsequent attach uses it seamlessly
                 dom = domain_or_url
                 try:
@@ -537,7 +581,7 @@ class SessionManager:
         except Exception:
             pass
         
-        # Check per-domain session
+        # Fallback: check per-domain session
         dom = domain_or_url
         try:
             if "://" in domain_or_url:
@@ -789,6 +833,39 @@ class SessionManager:
     def refresh_session(self, domain_or_url: str) -> bool:
         """Re-trigger interactive login to refresh an expired session."""
         return self.open_browser_login(domain_or_url)
+    
+    def initialize_from_persistent_store(self) -> bool:
+        """Initialize authentication from the global persistent store at session start.
+        
+        Returns True if valid authentication data was loaded.
+        """
+        try:
+            from .auth_store import read_auth, is_auth_still_valid, has_auth_data
+        except Exception:
+            from auth_store import read_auth, is_auth_still_valid, has_auth_data
+        
+        try:
+            data = read_auth(self._auth_store_path)
+            if data and has_auth_data(data) and is_auth_still_valid(data):
+                try:
+                    print(f"✅ Loaded persistent authentication data from {self._auth_store_path}")
+                except Exception:
+                    pass
+                return True
+            elif data and has_auth_data(data):
+                try:
+                    print(f"⚠️ Found expired authentication data in {self._auth_store_path}")
+                except Exception:
+                    pass
+                return False
+            else:
+                try:
+                    print(f"ℹ️ No authentication data found in {self._auth_store_path}")
+                except Exception:
+                    pass
+                return False
+        except Exception:
+            return False
 
     def clear_expired_sessions(self) -> None:
         """Clear expired sessions from both memory and disk."""

@@ -124,8 +124,42 @@ def is_auth_still_valid(data: Dict[str, Any]) -> bool:
     return False
 
 
-async def probe_auth_valid(http_client, url: str, data: Dict[str, Any]) -> Tuple[bool, Optional[int]]:
-    """Perform a lightweight GET to validate auth. Returns (ok, status_code)."""
+def has_auth_data(data: Dict[str, Any]) -> bool:
+    """Check if we have any authentication data (cookies, bearer token, or headers)."""
+    try:
+        # Check for valid cookies
+        cookies = data.get("cookies") or []
+        if cookies and any(_cookie_is_valid(c) for c in cookies):
+            return True
+        
+        # Check for bearer token
+        bearer = data.get("bearer") or data.get("token")
+        if bearer and isinstance(bearer, str) and bearer.strip():
+            return True
+        
+        # Check for authentication headers
+        headers = data.get("headers") or {}
+        if isinstance(headers, dict):
+            # Look for common auth headers
+            auth_headers = ["Authorization", "Cookie", "X-Auth-Token", "X-API-Key"]
+            for header in auth_headers:
+                if headers.get(header):
+                    return True
+    except Exception:
+        pass
+    
+    return False
+
+
+async def probe_auth_valid(http_client, url: str, data: Dict[str, Any], retry_on_failure: bool = True) -> Tuple[bool, Optional[int]]:
+    """Perform a lightweight GET to validate auth. Returns (ok, status_code).
+    
+    Args:
+        http_client: The HTTP client to use for the probe
+        url: The URL to probe
+        data: Authentication data from store
+        retry_on_failure: If True, try a second probe on failure to distinguish auth vs WAF issues
+    """
     try:
         from .utils import normalize_url
     except Exception:
@@ -135,10 +169,29 @@ async def probe_auth_valid(http_client, url: str, data: Dict[str, Any]) -> Tuple
     except Exception:
         u = url
     headers = auth_headers_from_store(data, base_headers={"X-BH-Identity": "auth-probe"})
+    
     try:
         r = await http_client.get(u, headers=headers, context="auth:probe")
+        
+        # Clear authentication failures
         if r.status_code in (401, 403):
+            # If retry_on_failure is enabled, try once more to distinguish between
+            # actual auth failure vs temporary WAF/rate limiting issues
+            if retry_on_failure:
+                import asyncio
+                await asyncio.sleep(1.0)  # Brief delay before retry
+                try:
+                    r2 = await http_client.get(u, headers=headers, context="auth:probe-retry")
+                    # If both attempts fail with auth errors, likely real auth failure
+                    if r2.status_code in (401, 403):
+                        return False, r2.status_code
+                    # If retry succeeds, original failure was likely temporary
+                    return True, r2.status_code
+                except Exception:
+                    pass
             return False, r.status_code
+        
+        # Success cases (2xx, 3xx, even 4xx non-auth errors indicate valid session)
         return True, r.status_code
     except Exception:
         return False, None

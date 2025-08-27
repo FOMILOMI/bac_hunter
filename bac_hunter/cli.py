@@ -140,6 +140,8 @@ def recon(
 
     db = Storage(settings.db_path)
     sm = SessionManager()
+    # Initialize from persistent auth store if available
+    sm.initialize_from_persistent_store()
 
     async def run_all():
         http = HttpClient(settings)
@@ -633,6 +635,8 @@ def scan_full(
     setup_logging(verbose)
     db = Storage(settings.db_path)
     sm = SessionManager()
+    # Initialize from persistent auth store if available
+    sm.initialize_from_persistent_store()
     # Parse targets (allow comma-separated inside a single arg)
     targets: List[str] = []
     for t in target:
