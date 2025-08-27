@@ -7,7 +7,7 @@ try:
 	from ..config import Settings, Identity
 	from ..storage import Storage
 	from .comparator import ResponseComparator, DiffResult
-except Exception:
+except ImportError:
 	from http_client import HttpClient
 	from config import Settings, Identity
 	from storage import Storage
@@ -29,8 +29,9 @@ class DifferentialTester:
         elapsed_ms = getattr(r, 'elapsed', 0.0) if hasattr(r, 'elapsed') else 0.0
         try:
             pid = self.db.save_probe_ext(url=url, identity=ident.name, status=r.status_code, length=len(r.content), content_type=r.headers.get("content-type"), body=body, elapsed_ms=float(elapsed_ms), headers=dict(r.headers))
-        except Exception:
+        except (AttributeError, OSError, ValueError) as e:
             # Fallback to legacy save if extended fails
+            log.debug(f"Extended probe save failed, falling back to legacy: {e}")
             self.db.save_probe(url=url, identity=ident.name, status=r.status_code, length=len(r.content), content_type=r.headers.get("content-type"), body=body)
         return r.status_code, len(r.content), r.headers.get("content-type"), body, dict(r.headers), float(elapsed_ms or 0.0)
 

@@ -813,8 +813,12 @@ class SessionManager:
                 target = domain_or_url
             try:
                 from .integrations.browser_automation import InteractiveLogin  # type: ignore
-            except Exception:
-                from integrations.browser_automation import InteractiveLogin  # type: ignore
+            except ImportError:
+                try:
+                    from integrations.browser_automation import InteractiveLogin  # type: ignore
+                except ImportError:
+                    log.warning("Browser automation not available")
+                    return False
         except Exception:
             return False
         try:
@@ -845,8 +849,12 @@ class SessionManager:
                 # Also persist to global auth_data.json so next runs can skip browser
                 try:
                     from .auth_store import write_auth
-                except Exception:
-                    from auth_store import write_auth
+                except ImportError:
+                    try:
+                        from auth_store import write_auth
+                    except ImportError:
+                        log.warning("Auth store not available for global persistence")
+                        return True  # Still return True since we saved locally
                 try:
                     # Build a headers snapshot
                     cookie_header = self._cookie_header_from_cookies(cookies or [])

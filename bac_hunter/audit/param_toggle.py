@@ -8,7 +8,7 @@ try:
 	from ..http_client import HttpClient
 	from ..storage import Storage
 	from ..access.comparator import ResponseComparator
-except Exception:
+except ImportError:
 	from config import Settings, Identity
 	from http_client import HttpClient
 	from storage import Storage
@@ -51,12 +51,14 @@ class ParamToggle:
                 continue
             try:
                 r0 = await self.http.get(u, headers=ident.headers())
-            except Exception:
+            except (AttributeError, OSError, ValueError) as e:
+                log.debug(f"Failed to fetch base URL {u}: {e}")
                 continue
             for t in toggles:
                 try:
                     r1 = await self.http.get(t, headers=ident.headers())
-                except Exception:
+                except (AttributeError, OSError, ValueError) as e:
+                    log.debug(f"Failed to fetch toggle URL {t}: {e}")
                     continue
                 diff = self.cmp.compare(r0.status_code, len(r0.content), r0.headers.get("content-type"), None,
                                         r1.status_code, len(r1.content), r1.headers.get("content-type"), None)

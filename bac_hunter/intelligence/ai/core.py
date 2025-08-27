@@ -15,7 +15,7 @@ except ImportError:
 # Optional joblib; fallback to pickle if unavailable
 try:
 	import joblib as _joblib  # type: ignore
-except Exception:  # joblib not installed
+except ImportError:  # joblib not installed
 	_joblib = None  # type: ignore
 import pickle
 
@@ -27,7 +27,7 @@ try:
 	from sklearn.pipeline import Pipeline
 	from sklearn.preprocessing import StandardScaler
 	from sklearn.base import BaseEstimator
-except Exception:
+except ImportError:
 	IsolationForest = None  # type: ignore
 	RandomForestClassifier = None  # type: ignore
 	LogisticRegression = None  # type: ignore
@@ -38,12 +38,12 @@ except Exception:
 
 try:
 	import numpy as np
-except Exception:
+except ImportError:
 	np = None  # type: ignore
 
 try:
 	import tensorflow as tf  # type: ignore
-except Exception:
+except ImportError:
 	tf = None  # type: ignore
 
 try:
@@ -51,7 +51,7 @@ try:
 	from ...http_client import HttpClient
 	from ...storage import Storage
 	from ...safety.waf_detector import WAFDetector
-except Exception:
+except ImportError:
 	from config import Settings
 	from http_client import HttpClient
 	from storage import Storage
@@ -69,7 +69,8 @@ def _safe_dump(obj: Any, path: Path):
 		if _joblib is not None:
 			_joblib.dump(obj, path)
 			return
-	except Exception:
+	except (AttributeError, OSError, ValueError) as e:
+		log.debug(f"Joblib dump failed: {e}")
 		pass
 	# Fallback: pickle
 	with path.open("wb") as f:
@@ -80,7 +81,8 @@ def _safe_load(path: Path) -> Any:
 	try:
 		if _joblib is not None:
 			return _joblib.load(path)
-	except Exception:
+	except (AttributeError, OSError, ValueError) as e:
+		log.debug(f"Joblib load failed: {e}")
 		pass
 	with path.open("rb") as f:
 		return pickle.load(f)

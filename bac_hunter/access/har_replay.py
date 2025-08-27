@@ -8,7 +8,7 @@ try:
 	from ..http_client import HttpClient
 	from ..storage import Storage
 	from .comparator import ResponseComparator
-except Exception:
+except ImportError:
 	from config import Identity, Settings
 	from http_client import HttpClient
 	from storage import Storage
@@ -32,7 +32,7 @@ class HARReplayAnalyzer:
         try:
             with open(har_path, "r", encoding="utf-8") as f:
                 har = json.load(f)
-        except Exception as e:
+        except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
             log.error("Failed to load HAR: %s", e)
             return []
         urls: List[str] = []
@@ -62,7 +62,8 @@ class HARReplayAnalyzer:
                 try:
                     ra = await self.http.get(u, headers=base.headers())
                     rb = await self.http.get(u, headers=other.headers())
-                except Exception:
+                except (AttributeError, OSError, ValueError) as e:
+                    log.debug(f"Failed to replay {u}: {e}")
                     continue
                 self.db.save_probe(url=u, identity=base.name, status=ra.status_code, length=len(ra.content), content_type=ra.headers.get("content-type"), body=b"")
                 self.db.save_probe(url=u, identity=other.name, status=rb.status_code, length=len(rb.content), content_type=rb.headers.get("content-type"), body=b"")

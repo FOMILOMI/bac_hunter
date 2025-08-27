@@ -7,7 +7,7 @@ try:
 	from ..http_client import HttpClient
 	from ..storage import Storage
 	from ..utils import normalize_url, is_recursive_duplicate_path
-except Exception:
+except ImportError:
 	from config import Identity, Settings
 	from http_client import HttpClient
 	from storage import Storage

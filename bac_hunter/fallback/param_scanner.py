@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+import logging
 from typing import List
 from urllib.parse import urlparse, urlunparse, urlencode
 
@@ -7,10 +8,12 @@ try:
 	from ..config import Settings, Identity
 	from ..http_client import HttpClient
 	from ..storage import Storage
-except Exception:
+except ImportError:
 	from config import Settings, Identity
 	from http_client import HttpClient
 	from storage import Storage
+
+log = logging.getLogger("fallback.param")
 
 
 class ParamScanner:
@@ -52,8 +55,8 @@ class ParamScanner:
                 if resp.status_code in (200, 206, 401, 403) and len(resp.content) > 256:
                     self.db.add_finding_for_url(target, "param_toggle", f"status={resp.status_code}; len={len(resp.content)}", 0.2)
                     out.append(target)
-            except Exception:
-                pass
+            except (AttributeError, OSError, ValueError) as e:
+                log.debug(f"Failed to probe {target}: {e}")
 
         tasks = []
         for u in candidates:

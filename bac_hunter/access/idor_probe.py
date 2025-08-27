@@ -14,7 +14,7 @@ try:
 	from .comparator import ResponseComparator
 	from ..intelligence.ai import BAC_ML_Engine
 	from .oracle import AccessOracle
-except Exception:
+except ImportError:
 	from config import Identity, Settings
 	from http_client import HttpClient
 	from storage import Storage
@@ -67,7 +67,8 @@ class IDORProbe:
 			desc = f"param:{name} value:{value[:32]}"
 			proba = model.predict_proba([desc])[0][1]  # type: ignore
 			return float(max(self._score_param(name), proba))
-		except Exception:
+		except (AttributeError, IndexError, ValueError, TypeError) as e:
+			log.debug(f"ML scoring failed for param {name}: {e}")
 			return self._score_param(name)
 
 	def _collect_correlated_values(self, base_url: str) -> Tuple[Dict[str, List[str]], Dict[int, List[str]]]:
@@ -76,7 +77,8 @@ class IDORProbe:
 		"""
 		try:
 			tid = self.db.ensure_target(base_url)
-		except Exception:
+		except (AttributeError, OSError, ValueError) as e:
+			log.debug(f"Failed to ensure target {base_url}: {e}")
 			return {}, {}
 		param_values: Dict[str, List[str]] = {}
 		path_values: Dict[int, List[str]] = {}
@@ -85,7 +87,8 @@ class IDORProbe:
 		# Iterate known URLs for this target
 		try:
 			urls: Iterable[str] = self.db.iter_target_urls(tid)
-		except Exception:
+		except (AttributeError, OSError, ValueError) as e:
+			log.debug(f"Failed to iterate target URLs: {e}")
 			urls = []
 		for u in urls:
 			try:

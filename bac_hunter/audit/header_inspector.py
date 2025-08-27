@@ -6,7 +6,7 @@ try:
 	from ..config import Settings, Identity
 	from ..http_client import HttpClient
 	from ..storage import Storage
-except Exception:
+except ImportError:
 	from config import Settings, Identity
 	from http_client import HttpClient
 	from storage import Storage
@@ -78,7 +78,8 @@ class HeaderInspector:
         origin = self.s.cors_probe_origin
         try:
             r = await self.http.get(url, headers={**ident.headers(), "Origin": origin})
-        except Exception:
+        except (AttributeError, OSError, ValueError) as e:
+            log.debug(f"Failed to perform CORS probe on {url}: {e}")
             return
         hd = self._lower(dict(r.headers))
         acao = hd.get("access-control-allow-origin")
@@ -91,7 +92,8 @@ class HeaderInspector:
         for u in urls:
             try:
                 r = await self.http.get(u, headers=ident.headers())
-            except Exception:
+            except (AttributeError, OSError, ValueError) as e:
+                log.debug(f"Failed to inspect headers for {u}: {e}")
                 continue
             hd = self._lower(dict(r.headers))
             for msg, score in self._check_cors(u, hd) + self._check_headers(u, hd):

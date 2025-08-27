@@ -1,6 +1,9 @@
 from __future__ import annotations
 import asyncio
 import logging
+import os
+import shutil
+import socket
 from typing import List, Optional
 import typer
 try:
@@ -2069,8 +2072,6 @@ def clear_sessions():
 	try:
 		from .session_manager import SessionManager
 		from .config import Settings
-		import os
-		import shutil
 		
 		s = Settings()
 		sm = SessionManager()
@@ -2102,8 +2103,6 @@ def connectivity_test(
 ):
 	"""🌐 Test network connectivity to target"""
 	try:
-		import httpx
-		import asyncio
 		from urllib.parse import urlparse
 		import time
 		
@@ -2135,7 +2134,6 @@ def connectivity_test(
 			
 			# DNS resolution test
 			try:
-				import socket
 				start = time.time()
 				socket.gethostbyname(host)
 				elapsed = time.time() - start
