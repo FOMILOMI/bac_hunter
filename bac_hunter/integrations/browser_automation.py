@@ -115,7 +115,8 @@ class SeleniumDriver:
 						token_ok = bool(d.execute_script(js))
 					except Exception:
 						token_ok = False
-					return url_ok or cookies_ok or selector_ok or logout_ok or token_ok
+					# Stronger success criteria: prefer explicit logged-in UI, else require URL off login and auth signal
+					return bool(selector_ok or logout_ok or (url_ok and (token_ok or cookies_ok)))
 				except Exception:
 					return False
 
@@ -124,10 +125,11 @@ class SeleniumDriver:
 		except Exception:
 			return False
 
-	def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None]:
+	def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None, dict | None]:
 		cookies: list = []
 		bearer: str | None = None
 		csrf: str | None = None
+		storage: dict | None = None
 		try:
 			if self._driver:
 				cookies = self._driver.get_cookies() or []
@@ -167,9 +169,24 @@ class SeleniumDriver:
 				if maybe and isinstance(maybe, dict):
 					bearer = (maybe.get('token') or None)
 					csrf = (maybe.get('csrf') or None)
+				# Dump storage maps for persistence
+				try:
+					storage_js = r"""
+					(() => {
+						const out = { localStorage: {}, sessionStorage: {} };
+						try { for (const k of Object.keys(localStorage||{})) { out.localStorage[k] = localStorage.getItem(k); } } catch(e){}
+						try { for (const k of Object.keys(sessionStorage||{})) { out.sessionStorage[k] = sessionStorage.getItem(k); } } catch(e){}
+						return out;
+					})()
+					"""
+					maybe_store = self._driver.execute_script(storage_js)
+					if isinstance(maybe_store, dict):
+						storage = maybe_store
+				except Exception:
+					storage = None
 		except Exception:
 			pass
-		return cookies, bearer, csrf
+		return cookies, bearer, csrf, storage
 
 	def close(self):
 		if self._driver:
@@ -339,6 +356,9 @@ class PlaywrightDriver:
 		]
 		auth_cookie_names = [c.strip().lower() for c in (cookie_names_env.split(",") if cookie_names_env else default_cookie_names) if c.strip()]
 
+		# Require stability window before concluding login success
+		stable_seconds = max(1, int(os.getenv("BH_LOGIN_STABLE_SECONDS", "2") or "2"))
+
 		async def has_auth_cookie() -> bool:
 			try:
 				if not self._ctx:
@@ -354,6 +374,7 @@ class PlaywrightDriver:
 			except Exception:
 				return False
 
+		stable_start: float | None = None
 		while True:
 			now = asyncio.get_event_loop().time()
 			if now >= deadline:
@@ -416,20 +437,28 @@ class PlaywrightDriver:
 				except Exception:
 					selector_ok = False
 
-				if url_ok or token_ok or cookies_ok or selector_ok:
-					print("[success] Login detected! Capturing session data...")
-					await asyncio.sleep(1)  # Grace period
-					return True
+				# Stronger success criteria and stability requirement
+				strong_ok = bool(selector_ok or (url_ok and (token_ok or cookies_ok)))
+				if strong_ok:
+					if stable_start is None:
+						stable_start = now
+					elif (now - stable_start) >= stable_seconds:
+						print("[success] Login confirmed. Capturing session data...")
+						await asyncio.sleep(1)
+						return True
+				else:
+					stable_start = None
 
 			except Exception as e:
 				print(f"[debug] Login check error: {e}")
 
 			await asyncio.sleep(0.5)
 
-	async def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None]:
+	async def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None, dict | None]:
 		cookies: list = []
 		bearer: str | None = None
 		csrf: str | None = None
+		storage: dict | None = None
 
 		try:
 			if self._ctx:
@@ -484,10 +513,24 @@ class PlaywrightDriver:
 				if maybe_csrf:
 					csrf = str(maybe_csrf).strip()
 
+				# Dump localStorage and sessionStorage
+				storage_js = r"""
+				(() => {
+					const out = { localStorage: {}, sessionStorage: {} };
+					try { for (const k of Object.keys(localStorage||{})) { out.localStorage[k] = localStorage.getItem(k); } } catch(e){}
+					try { for (const k of Object.keys(sessionStorage||{})) { out.sessionStorage[k] = sessionStorage.getItem(k); } } catch(e){}
+					return out;
+				})()
+				"""
+				try:
+					storage = await self._page.evaluate(storage_js)
+				except Exception:
+					storage = None
+
 		except Exception as e:
 			print(f"[debug] Token extraction error: {e}")
 
-		return cookies, bearer, csrf
+		return cookies, bearer, csrf, storage
 
 	async def _inject_browser_guidance(self, total_seconds: int):
 		try:
@@ -564,9 +607,9 @@ class InteractiveLogin:
 		else:
 			self._drv = PlaywrightDriver()
 
-	async def open_and_wait(self, url: str, timeout_seconds: int = 180) -> tuple[list, str | None, str | None]:
+	async def open_and_wait(self, url: str, timeout_seconds: int = 180) -> tuple[list, str | None, str | None, dict | None]:
 		if not self._drv:
-			return [], None, None
+			return [], None, None, None
 
 		# Selenium path remains synchronous; run in worker thread to avoid blocking loop
 		if self._driver_kind == "selenium":
@@ -581,17 +624,17 @@ class InteractiveLogin:
 					except Exception:
 						login_ok = False
 					if login_ok:
-						cookies, bearer, csrf = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+						cookies, bearer, csrf, storage = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
 						self._drv.close()
-						return cookies, bearer, csrf
+						return cookies, bearer, csrf, storage
 					self._drv.close()
-					return [], None, None
+					return [], None, None, None
 				except Exception:
 					try:
 						self._drv.close()
 					except Exception:
 						pass
-					return [], None, None
+					return [], None, None, None
 
 			return await asyncio.to_thread(run_sync)
 
@@ -599,7 +642,7 @@ class InteractiveLogin:
 		try:
 			ok = await self._drv.initialize()  # type: ignore[attr-defined]
 			if not ok:
-				return [], None, None
+				return [], None, None, None
 			await self._drv.open(url)  # type: ignore[attr-defined]
 			login_ok = False
 			try:
@@ -607,14 +650,14 @@ class InteractiveLogin:
 			except Exception:
 				login_ok = False
 			if login_ok:
-				cookies, bearer, csrf = await self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+				cookies, bearer, csrf, storage = await self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
 				await self._drv.close()  # type: ignore[attr-defined]
-				return cookies, bearer, csrf
+				return cookies, bearer, csrf, storage
 			await self._drv.close()  # type: ignore[attr-defined]
-			return [], None, None
+			return [], None, None, None
 		except Exception:
 			try:
 				await self._drv.close()  # type: ignore[attr-defined]
 			except Exception:
 				pass
-			return [], None, None
+			return [], None, None, None

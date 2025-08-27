@@ -54,7 +54,7 @@ What it does:
 ### Authentication & Login Flow
 
 - At the start of each command, if semi‑automatic login is enabled, the tool will open a browser window for each unique target domain and prompt you to log in manually.
-- After you log in, cookies and tokens are automatically captured and saved under `sessions/<domain>.json` and reused for all subsequent requests.
+- After you log in, cookies, tokens, and storage (localStorage/sessionStorage) are captured and saved under `sessions/<domain>.json` and reused for all subsequent requests. An aggregate index is also written to `sessions/session.json` for convenience.
 - Expired or missing cookies will trigger the login flow again.
 
 Environment variables:
@@ -64,6 +64,9 @@ export BH_SEMI_AUTO_LOGIN=true   # default: true
 export BH_BROWSER=playwright     # or 'selenium'
 export BH_LOGIN_TIMEOUT=180      # seconds
 export BH_SESSIONS_DIR=sessions  # where session files are stored
+export BH_LOGIN_SUCCESS_SELECTOR="nav .logout"   # optional CSS to confirm login
+export BH_AUTH_COOKIE_NAMES="sessionid,auth_token,jwt"  # optional list
+export BH_LOGIN_STABLE_SECONDS=2  # require stable post-login state before closing
 ```
 
 Docker notes:

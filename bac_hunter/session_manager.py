@@ -27,8 +27,10 @@ class SessionManager:
     def __init__(self):
         self._identities: Dict[str, Identity] = {}
         self.add_identity(Identity(name="anon", base_headers={"User-Agent": pick_ua()}))
-        # Domain -> session dict {cookies: list, bearer: str, csrf: str}
+        # Domain -> session dict {cookies: list, bearer: str, csrf: str, storage: dict}
         self._domain_sessions: Dict[str, Dict[str, object]] = {}
+        # Aggregate index path for convenience (optional)
+        self._aggregate_path: Optional[str] = None
         self._sessions_dir: Optional[str] = None
         # Interactive login configuration
         self._browser_driver: str = "playwright"
@@ -52,6 +54,11 @@ class SessionManager:
             os.makedirs(self._sessions_dir, exist_ok=True)
         except Exception:
             pass
+        # Aggregate index path
+        try:
+            self._aggregate_path = f"{self._sessions_dir}/session.json"
+        except Exception:
+            self._aggregate_path = None
         if browser_driver:
             self._browser_driver = browser_driver
         if login_timeout_seconds is not None:
@@ -162,7 +169,7 @@ class SessionManager:
             return self._domain_sessions[domain]
         path = self._session_path(domain)
         if not path or not os.path.exists(path):
-            self._domain_sessions[domain] = {"cookies": [], "bearer": None, "csrf": None}
+            self._domain_sessions[domain] = {"cookies": [], "bearer": None, "csrf": None, "storage": None}
             return self._domain_sessions[domain]
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -170,20 +177,40 @@ class SessionManager:
             cookies = data.get("cookies") or []
             bearer = data.get("bearer")
             csrf = data.get("csrf")
-            self._domain_sessions[domain] = {"cookies": cookies, "bearer": bearer, "csrf": csrf}
+            storage = data.get("storage") or None
+            self._domain_sessions[domain] = {"cookies": cookies, "bearer": bearer, "csrf": csrf, "storage": storage}
         except Exception:
-            self._domain_sessions[domain] = {"cookies": [], "bearer": None, "csrf": None}
+            self._domain_sessions[domain] = {"cookies": [], "bearer": None, "csrf": None, "storage": None}
         return self._domain_sessions[domain]
 
-    def save_domain_session(self, domain: str, cookies: list, bearer: Optional[str] = None, csrf: Optional[str] = None):
-        import json
-        self._domain_sessions[domain] = {"cookies": cookies or [], "bearer": bearer, "csrf": csrf}
+    def save_domain_session(self, domain: str, cookies: list, bearer: Optional[str] = None, csrf: Optional[str] = None, storage: Optional[dict] = None):
+        import json, os
+        self._domain_sessions[domain] = {"cookies": cookies or [], "bearer": bearer, "csrf": csrf, "storage": storage}
         path = self._session_path(domain)
         if not path:
             return
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(self._domain_sessions[domain], f, indent=2)
+        except Exception:
+            pass
+        # Update aggregate sessions/session.json (for debugging and reuse)
+        try:
+            if self._aggregate_path and self._sessions_dir:
+                aggregate: Dict[str, object] = {}
+                for fname in os.listdir(self._sessions_dir):
+                    if not fname.endswith(".json"):
+                        continue
+                    if fname == self._aggregate_path.split("/")[-1]:
+                        continue
+                    dom = fname[:-5]
+                    try:
+                        with open(f"{self._sessions_dir}/{fname}", "r", encoding="utf-8") as sf:
+                            aggregate[dom] = json.load(sf)
+                    except Exception:
+                        continue
+                with open(self._aggregate_path, "w", encoding="utf-8") as af:
+                    json.dump(aggregate, af, indent=2)
         except Exception:
             pass
 
@@ -367,7 +394,7 @@ class SessionManager:
             pass
         # Persist updated session
         try:
-            self.save_domain_session(domain, sess.get("cookies") or [], sess.get("bearer"), sess.get("csrf"))
+            self.save_domain_session(domain, sess.get("cookies") or [], sess.get("bearer"), sess.get("csrf"), sess.get("storage"))
         except Exception:
             pass
 
@@ -396,9 +423,19 @@ class SessionManager:
             return False
         sess = self.load_domain_session(dom)
         try:
+            # Only count auth-like cookies to avoid false positives
+            auth_names = [
+                "sessionid", "session_id", "session", "_session", "sid", "connect.sid",
+                "auth", "auth_token", "token", "jwt", "access_token"
+            ]
             cookies = sess.get("cookies") or []
             for c in cookies:
-                if self._cookie_is_valid(c):
+                if not self._cookie_is_valid(c):
+                    continue
+                name = str(c.get("name") or "").lower()
+                if not name:
+                    continue
+                if name in auth_names or any(n in name for n in auth_names):
                     return True
         except Exception:
             pass
@@ -525,16 +562,16 @@ class SessionManager:
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as executor:
                     future = executor.submit(asyncio.run, drv.open_and_wait(target, self._login_timeout_seconds))
-                    cookies, bearer, csrf = future.result()
+                    cookies, bearer, csrf, storage = future.result()
             except RuntimeError:
                 # No running loop, safe to use asyncio.run directly
-                cookies, bearer, csrf = asyncio.run(drv.open_and_wait(target, self._login_timeout_seconds))
+                cookies, bearer, csrf, storage = asyncio.run(drv.open_and_wait(target, self._login_timeout_seconds))
 
             # Persist if anything was captured
             if cookies or bearer or csrf:
                 domain = self._hostname_from_url(target)
                 if domain:
-                    self.save_domain_session(domain, cookies, bearer, csrf)
+                    self.save_domain_session(domain, cookies, bearer, csrf, storage)
                     try:
                         print(f"[debug] Session saved for {domain}")
                     except Exception:
