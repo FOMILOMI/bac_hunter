@@ -111,7 +111,7 @@ class SeleniumDriver:
 					logout_ok = has_logout_element()
 					# Token presence in storage (best-effort)
 					try:
-						js = ("return (function(){try{const ks=Object.keys(localStorage||{});for(const k of ks){const v=localStorage.getItem(k)||'';if(/bearer|token|jwt|auth/i.test(k)||/eyJ[A-Za-z0-9_-]{10,}\\\./.test(v))return true;}const sk=Object.keys(sessionStorage||{});for(const k of sk){const v=sessionStorage.getItem(k)||'';if(/bearer|token|jwt|auth/i.test(k)||/eyJ[A-Za-z0-9_-]{10,}\\\./.test(v))return true;}return false;}catch(e){return false;}})();")
+						js = r"return (function(){try{const ks=Object.keys(localStorage||{});for(const k of ks){const v=localStorage.getItem(k)||'';if(/bearer|token|jwt|auth/i.test(k)||/eyJ[A-Za-z0-9_-]{10,}\./.test(v))return true;}const sk=Object.keys(sessionStorage||{});for(const k of sk){const v=sessionStorage.getItem(k)||'';if(/bearer|token|jwt|auth/i.test(k)||/eyJ[A-Za-z0-9_-]{10,}\./.test(v))return true;}return false;}catch(e){return false;}})();"
 						token_ok = bool(d.execute_script(js))
 					except Exception:
 						token_ok = False
@@ -138,13 +138,13 @@ class SeleniumDriver:
 				  let token = null;
 				  for (const k of keys) {
 				    const v = localStorage.getItem(k) || '';
-				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) { token = v; break; }
+				    if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) { token = v; break; }
 				  }
 				  if (!token) {
 				    const sk = Object.keys(sessionStorage || {});
 				    for (const k of sk) {
 				      const v = sessionStorage.getItem(k) || '';
-				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) { token = v; break; }
+				      if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) { token = v; break; }
 				    }
 				  }
 				  let csrf = null;
@@ -214,24 +214,89 @@ class PlaywrightDriver:
 
 			print(f"[debug] Launching browser with: {executable_path or 'default'}")
 
-			if executable_path:
-				self._browser = await self._playwright.chromium.launch(
-					executable_path=executable_path, **launch_kwargs
-				)
-			else:
-				try:
-					self._browser = await self._playwright.chromium.launch(channel="chrome", **launch_kwargs)
-				except Exception:
-					self._browser = await self._playwright.chromium.launch(**launch_kwargs)
+			# Determine persistent user data directory
+			user_data_dir = os.environ.get("BH_CHROME_USER_DATA_DIR") or os.environ.get("BH_CHROMIUM_USER_DATA_DIR")
+			try:
+				if not user_data_dir:
+					home = os.path.expanduser("~")
+					candidates = []
+					try:
+						base = os.path.basename(executable_path or "")
+						if "chrome" in base:
+							candidates.append(os.path.join(home, ".config", "google-chrome"))
+							candidates.append(os.path.join(home, ".config", "google-chrome-beta"))
+					except Exception:
+						pass
+					candidates.append(os.path.join(home, ".config", "chromium"))
+					for c in candidates:
+						if os.path.isdir(c):
+							user_data_dir = c
+							print(f"[debug] Using existing Chrome user data dir: {user_data_dir}")
+							break
+					if not user_data_dir:
+						user_data_dir = os.path.join(home, ".cache", "bac_hunter", "chrome-user-data")
+						os.makedirs(user_data_dir, exist_ok=True)
+						print(f"[debug] Using dedicated user data dir: {user_data_dir}")
+			except Exception as e:
+				print(f"[debug] User data dir setup warning: {e}")
 
-			print("[debug] Browser launched, creating context...")
-			self._ctx = await self._browser.new_context()
+			# Realistic user agent
+			ua = os.environ.get("BH_CHROME_UA") or "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-			print("[debug] Context created, creating page...")
-			self._page = await self._ctx.new_page()
-
-			print("[debug] Playwright browser launched successfully.")
-			return True
+			args_list = [
+				"--no-sandbox",
+				"--disable-gpu",
+				"--disable-dev-shm-usage",
+				"--disable-blink-features=AutomationControlled",
+				"--disable-infobars",
+			]
+			try:
+				if executable_path:
+					self._ctx = await self._playwright.chromium.launch_persistent_context(
+						user_data_dir=user_data_dir,
+						executable_path=executable_path,
+						headless=False,
+						args=args_list,
+						user_agent=ua,
+						viewport=None,
+					)
+				else:
+					try:
+						self._ctx = await self._playwright.chromium.launch_persistent_context(
+							user_data_dir=user_data_dir,
+							channel="chrome",
+							headless=False,
+							args=args_list,
+							user_agent=ua,
+							viewport=None,
+						)
+					except Exception:
+						self._ctx = await self._playwright.chromium.launch_persistent_context(
+							user_data_dir=user_data_dir,
+							headless=False,
+							args=args_list,
+							user_agent=ua,
+							viewport=None,
+						)
+				print("[debug] Persistent context launched.")
+				self._page = await self._ctx.new_page()
+				print("[debug] Playwright browser launched successfully.")
+				return True
+			except Exception as e:
+				print(f"[debug] Persistent context launch failed, falling back: {e}")
+				if executable_path:
+					self._browser = await self._playwright.chromium.launch(
+						executable_path=executable_path, **launch_kwargs
+					)
+				else:
+					try:
+						self._browser = await self._playwright.chromium.launch(channel="chrome", **launch_kwargs)
+					except Exception:
+						self._browser = await self._playwright.chromium.launch(**launch_kwargs)
+				self._ctx = await self._browser.new_context(user_agent=ua, viewport=None)
+				self._page = await self._ctx.new_page()
+				print("[debug] Playwright browser launched successfully.")
+				return True
 
 		except Exception as e:
 			print(f"[ERROR] Async Playwright initialization failed: {e}")
@@ -325,12 +390,12 @@ class PlaywrightDriver:
 						const keys = Object.keys(localStorage || {});
 						for (const k of keys) {
 							const v = localStorage.getItem(k) || '';
-							if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
+							if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) return true;
 						}
 						const sk = Object.keys(sessionStorage || {});
 						for (const k of sk) {
 							const v = sessionStorage.getItem(k) || '';
-							if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) return true;
+							if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) return true;
 						}
 						return false;
 					})()
@@ -377,14 +442,14 @@ class PlaywrightDriver:
 					const keys = Object.keys(localStorage || {});
 					for (const k of keys) {
 						const v = localStorage.getItem(k) || '';
-						if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) {
+						if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) {
 							return v;
 						}
 					}
 					const sk = Object.keys(sessionStorage || {});
 					for (const k of sk) {
 						const v = sessionStorage.getItem(k) || '';
-						if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\\\./.test(v)) {
+						if (/bearer|token|jwt|auth/i.test(k) || /eyJ[A-Za-z0-9_-]{10,}\./.test(v)) {
 							return v;
 						}
 					}
