@@ -30,12 +30,44 @@ Professional-grade, AI-enhanced automation framework for discovering Broken Acce
 ## 🚀 Quick Start
 
 ### Installation
+
+#### Recommended: Using Virtual Environment
 ```bash
 # Python 3.11+ required (tested on Python 3.13)
-pip3 install --break-system-packages -r requirements.txt
-# Optional (for tests):
-pip3 install --break-system-packages pytest
+# Create and activate virtual environment
+python3 -m venv bac_hunter_env
+source bac_hunter_env/bin/activate  # On Windows: bac_hunter_env\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Optional (for development and tests):
+pip install pytest
 ```
+
+#### Alternative: System-wide Installation
+```bash
+# If you prefer system-wide installation (not recommended for production)
+pip3 install --break-system-packages -r requirements.txt
+```
+
+#### Troubleshooting Installation Issues
+
+**Missing python3-venv on Ubuntu/Debian:**
+```bash
+sudo apt update && sudo apt install python3-venv python3-pip
+```
+
+**Permission denied errors:**
+```bash
+# Use virtual environment instead of --break-system-packages
+python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+```
+
+**Missing dependencies errors:**
+- Ensure all dependencies in `requirements.txt` are installed
+- Key dependencies: `numpy`, `scikit-learn`, `httpx`, `typer`, `rich`
+- For AI features: `tensorflow-cpu`, `nltk`, `pandas`
 
 ### 🧙 Quick Start with Setup Wizard (Recommended for Beginners)
 
@@ -249,6 +281,72 @@ python -m bac_hunter report --output report.sarif # SARIF for CI integrations
 - External tools missing (subfinder/httpx): integration wrappers degrade gracefully; install tools to enable richer results.
 - PDF export errors: WeasyPrint relies on system libraries; the exporter falls back to HTML automatically.
 - SQLite locked or large: use `db-prune`; rerun with lower RPS.
+
+## 🔧 Troubleshooting Common Issues
+
+### Import Errors
+
+**ModuleNotFoundError: No module named 'numpy'**
+```bash
+# Install numpy and other ML dependencies
+pip install numpy scikit-learn pandas
+```
+
+**ModuleNotFoundError: No module named 'anomaly_detection'**
+- This indicates the AI modules aren't being imported correctly
+- Ensure all `__init__.py` files are present in subdirectories
+- Verify you're running from the project root directory
+
+**ModuleNotFoundError: No module named 'config'**
+- Use relative imports: `from ..config import Settings, Identity`
+- Ensure you're importing from the correct module path
+- Run `python -m bac_hunter` instead of direct script execution
+
+**ImportError: cannot import name 'ClassName'**
+- Check the actual class names in the module (they may differ from documentation)
+- Common correct class names:
+  - `IDORProbe` (not `IdorProbe`)
+  - `SmartAuthIntel` (not `SmartAuth`)
+  - `IntelligentTargetProfiler` (not `TargetProfiler`)
+
+### Runtime Errors
+
+**Permission denied when installing packages**
+```bash
+# Use virtual environment (recommended)
+python3 -m venv bac_hunter_env
+source bac_hunter_env/bin/activate
+pip install -r requirements.txt
+```
+
+**Virtual environment creation fails**
+```bash
+# On Ubuntu/Debian systems
+sudo apt install python3-venv python3-pip
+```
+
+**CLI commands not working**
+```bash
+# Ensure you're using the module syntax
+python -m bac_hunter --help
+python -m bac_hunter smart-scan --help
+
+# Not: python bac_hunter.py
+```
+
+### Testing Your Installation
+
+Run this quick test to verify everything is working:
+```bash
+# Test basic functionality
+python -m bac_hunter --help
+
+# Test AI modules
+python -c "from bac_hunter.intelligence.ai.core import BAC_ML_Engine; print('AI modules OK')"
+
+# Test access modules  
+python -c "from bac_hunter.access.idor_probe import IDORProbe; print('Access modules OK')"
+```
 
 ## 🧰 Known Limitations
 - Network-dependent checks may return sparse results against `https://example.com`.
