@@ -191,7 +191,30 @@ class SessionManager:
 
     def save_domain_session(self, domain: str, cookies: list, bearer: Optional[str] = None, csrf: Optional[str] = None, storage: Optional[dict] = None):
         import json, os
-        self._domain_sessions[domain] = {"cookies": cookies or [], "bearer": bearer, "csrf": csrf, "storage": storage}
+        # Filter cookies to only those that belong to this domain (respecting leading dot semantics)
+        def _belongs_to_domain(c: dict, dom: str) -> bool:
+            try:
+                cd = (c.get("domain") or "").strip().lower()
+                if not cd:
+                    # If no domain attribute, assume it's for the exact domain we are persisting
+                    return True
+                # Normalize leading dot
+                cd = cd.lstrip('.')
+                d = dom.strip().lower()
+                # Exact match or subdomain cookie scope
+                return d == cd or d.endswith("." + cd)
+            except Exception:
+                return True
+        filtered_cookies = []
+        try:
+            for c in (cookies or []):
+                if not isinstance(c, dict):
+                    continue
+                if _belongs_to_domain(c, domain):
+                    filtered_cookies.append(c)
+        except Exception:
+            filtered_cookies = cookies or []
+        self._domain_sessions[domain] = {"cookies": filtered_cookies, "bearer": bearer, "csrf": csrf, "storage": storage}
         path = self._session_path(domain)
         if not path:
             return
@@ -227,7 +250,19 @@ class SessionManager:
             h.update(base_headers)
         # Filter out expired cookies to avoid sending stale values
         cookies_all = sess.get("cookies") or []
-        cookies_valid = [c for c in cookies_all if self._cookie_is_valid(c)]
+        # Keep only cookies that match this domain (respecting leading dot semantics)
+        def _belongs_to_domain(c: dict, dom: str) -> bool:
+            try:
+                cd = (c.get("domain") or "").strip().lower()
+                if not cd:
+                    return True
+                cd = cd.lstrip('.')
+                d = dom.strip().lower()
+                return d == cd or d.endswith("." + cd)
+            except Exception:
+                return True
+        cookies_scoped = [c for c in cookies_all if _belongs_to_domain(c, domain)]
+        cookies_valid = [c for c in cookies_scoped if self._cookie_is_valid(c)]
         cookie_header = self._cookie_header_from_cookies(cookies_valid)
         if cookie_header:
             h["Cookie"] = cookie_header
@@ -347,20 +382,50 @@ class SessionManager:
                 parts = [p.strip() for p in set_cookie.split(',') if p.strip()]
                 # Some servers send multiple cookies separated by comma; process conservatively
                 for part in parts:
-                    kv = part.split(';', 1)[0]
+                    # Extract attributes
+                    try:
+                        kv = part.split(';', 1)[0]
+                        attrs = part.split(';')[1:]
+                    except Exception:
+                        kv = part
+                        attrs = []
                     if '=' in kv:
                         name, val = kv.split('=', 1)
                         if name and val:
-                            # Upsert cookie by name
+                            cdomain = None
+                            cpath = None
+                            for a in attrs:
+                                try:
+                                    k, v = a.split('=', 1)
+                                except ValueError:
+                                    continue
+                                k = k.strip().lower()
+                                v = v.strip()
+                                if k == 'domain':
+                                    cdomain = v
+                                elif k == 'path':
+                                    cpath = v
+                            # Upsert cookie by name and scope
                             cookies = sess.get("cookies") or []
                             found = False
                             for c in cookies:
                                 if c.get("name") == name:
-                                    c["value"] = val
-                                    found = True
-                                    break
+                                    # Prefer updating same-scope cookie
+                                    if (not cdomain or c.get('domain') == cdomain):
+                                        c["value"] = val
+                                        if cdomain:
+                                            c["domain"] = cdomain
+                                        if cpath:
+                                            c["path"] = cpath
+                                        found = True
+                                        break
                             if not found:
-                                cookies.append({"name": name, "value": val})
+                                entry = {"name": name, "value": val}
+                                if cdomain:
+                                    entry["domain"] = cdomain
+                                if cpath:
+                                    entry["path"] = cpath
+                                cookies.append(entry)
                             sess["cookies"] = cookies
         except Exception:
             pass
@@ -419,7 +484,7 @@ class SessionManager:
     # ---- Interactive pre-login helpers ----
     def has_valid_session(self, domain_or_url: str) -> bool:
         """Check if we have any non-expired cookie or a bearer token for the domain."""
-        # Prefer global auth store if present and valid; hydrate per-domain cache lazily
+        # Prefer global auth store if present and valid; hydrate per-domain cache lazily, but ensure it matches this domain
         try:
             from .auth_store import read_auth, is_auth_still_valid
         except Exception:
@@ -427,7 +492,7 @@ class SessionManager:
         try:
             data = read_auth(self._auth_store_path)
             if data and is_auth_still_valid(data):
-                # Hydrate per-domain cache so subsequent attach uses it seamlessly
+                # Resolve domain for scope matching
                 dom = domain_or_url
                 try:
                     if "://" in domain_or_url:
@@ -436,14 +501,34 @@ class SessionManager:
                     pass
                 if dom:
                     try:
-                        cookies = data.get("cookies") or []
+                        # Filter cookies to this domain scope
+                        cookies = []
+                        for c in (data.get("cookies") or []):
+                            if not isinstance(c, dict):
+                                continue
+                            cd = str(c.get("domain") or "").lstrip('.').lower()
+                            dlow = dom.lower()
+                            if not cd or dlow == cd or dlow.endswith("." + cd):
+                                cookies.append(c)
                         bearer = data.get("bearer") or data.get("token")
                         csrf = data.get("csrf")
                         storage = data.get("storage")
                         self.save_domain_session(dom, cookies, bearer, csrf, storage)
+                        # Determine validity for this domain only
+                        if bearer:
+                            return True
+                        auth_names = [
+                            "sessionid", "session_id", "session", "_session", "sid", "connect.sid",
+                            "auth", "auth_token", "token", "jwt", "access_token"
+                        ]
+                        for c in cookies:
+                            if not self._cookie_is_valid(c):
+                                continue
+                            name = str(c.get("name") or "").lower()
+                            if name and (name in auth_names or any(n in name for n in auth_names)):
+                                return True
                     except Exception:
                         pass
-                return True
         except Exception:
             pass
         dom = domain_or_url

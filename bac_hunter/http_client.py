@@ -133,7 +133,14 @@ class HttpClient:
                 try:
                     data = read_auth()
                     if data and is_auth_still_valid(data):
-                        cookies = data.get("cookies") or []
+                        # Filter cookies to the request host scope if domain attributes exist
+                        cookies = []
+                        for c in (data.get("cookies") or []):
+                            if not isinstance(c, dict):
+                                continue
+                            cd = str(c.get("domain") or "").lstrip('.').lower()
+                            if not cd or host.lower() == cd or host.lower().endswith("." + cd):
+                                cookies.append(c)
                         bearer = data.get("bearer") or data.get("token")
                         csrf = data.get("csrf")
                         storage = data.get("storage")

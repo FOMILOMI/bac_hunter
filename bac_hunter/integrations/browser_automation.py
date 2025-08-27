@@ -363,7 +363,14 @@ class PlaywrightDriver:
 			try:
 				if not self._ctx:
 					return False
-				cookies = await self._ctx.cookies()
+				# Limit cookie check to current page URL to avoid third-party cookies (e.g., Google)
+				urls = []
+				try:
+					if self._page and self._page.url:
+						urls = [self._page.url]
+				except Exception:
+					urls = []
+				cookies = await self._ctx.cookies(urls) if urls else await self._ctx.cookies()
 				for c in cookies or []:
 					name = str(c.get("name") or "").lower()
 					if not name:
@@ -462,7 +469,14 @@ class PlaywrightDriver:
 
 		try:
 			if self._ctx:
-				cookies = await self._ctx.cookies()
+				# Restrict extracted cookies to the current page URL to avoid unrelated domains
+				urls = []
+				try:
+					if self._page and self._page.url:
+						urls = [self._page.url]
+				except Exception:
+					urls = []
+				cookies = await self._ctx.cookies(urls) if urls else await self._ctx.cookies()
 
 			if self._page:
 				# Extract bearer token
