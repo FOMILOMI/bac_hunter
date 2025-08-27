@@ -1,0 +1,12 @@
+{
+  "cookies": [
+    {
+      "name": "auth_token",
+      "value": "integration_test",
+      "domain": "httpbin.org"
+    }
+  ],
+  "bearer": null,
+  "csrf": null,
+  "storage": null
+}
