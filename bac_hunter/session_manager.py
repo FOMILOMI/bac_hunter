@@ -616,53 +616,121 @@ class SessionManager:
     def ensure_logged_in(self, domain_or_url: str) -> bool:
         """Ensure user has logged in for the given domain. Triggers browser if needed.
         Returns True if a valid session exists after this call.
+        
+        Enhanced with circuit breaker pattern and intelligent backoff.
         """
         # Short-circuit in offline/CI mode
         if not self._enable_semi_auto_login:
             return False
         
+        domain = self._hostname_from_url(domain_or_url) or domain_or_url
+        
+        # Initialize circuit breaker tracking
+        if not hasattr(self, '_login_circuit_breaker'):
+            self._login_circuit_breaker = {}
+        if not hasattr(self, '_login_backoff_until'):
+            self._login_backoff_until = {}
+            
+        current_time = self._now()
+        
+        # Check if domain is in backoff period
+        if domain in self._login_backoff_until:
+            backoff_until = self._login_backoff_until[domain]
+            if current_time < backoff_until:
+                remaining = int(backoff_until - current_time)
+                try:
+                    log.warning(f"[{domain}] Login backoff active. {remaining}s remaining")
+                    print(f"⏳ [{domain}] Login backoff active. {remaining}s remaining")
+                except Exception:
+                    pass
+                return False
+        
         # Check if we already have a valid session
         if self.has_valid_session(domain_or_url):
             try:
-                print(f"✅ Reusing existing session for {domain_or_url}")
+                print(f"✅ Reusing existing session for {domain}")
+                # Reset circuit breaker on successful validation
+                self._login_circuit_breaker.pop(domain, None)
+                self._login_backoff_until.pop(domain, None)
             except Exception:
                 pass
             return True
+        
+        # Check circuit breaker state
+        failures = self._login_circuit_breaker.get(domain, 0)
+        if failures >= 3:
+            # Exponential backoff: 1min, 5min, 15min, 30min
+            backoff_minutes = min(30, [1, 5, 15, 30][min(failures - 3, 3)])
+            self._login_backoff_until[domain] = current_time + (backoff_minutes * 60)
+            try:
+                log.error(f"[{domain}] Circuit breaker activated after {failures} failures. Backoff: {backoff_minutes}min")
+                print(f"🔴 [{domain}] Too many login failures ({failures}). Backing off for {backoff_minutes} minutes")
+            except Exception:
+                pass
+            return False
         
         # Bounded retries with overall timeout to avoid infinite loops
         attempts = 0
         deadline = self._now() + max(self._login_timeout_seconds, self._overall_login_timeout_seconds)
+        
         while (attempts < self._max_login_retries) and (self._now() < deadline) and not self.has_valid_session(domain_or_url):
             attempts += 1
             try:
-                print(f"🔐 Attempt {attempts}/{self._max_login_retries}: Opening browser for login...")
+                print(f"🔐 Attempt {attempts}/{self._max_login_retries}: Opening browser for login to {domain}...")
             except Exception:
                 pass
+                
+            # Add progressive delay between attempts
+            if attempts > 1:
+                delay = min(30, attempts * 5)  # 5s, 10s, 15s, etc., max 30s
+                try:
+                    print(f"⏱️  Waiting {delay}s before retry...")
+                    import time
+                    time.sleep(delay)
+                except Exception:
+                    pass
+            
             ok = self.open_browser_login(domain_or_url)
+            
+            # Check if login was successful
             if self.has_valid_session(domain_or_url):
                 try:
-                    print(f"✅ Login successful! Session saved for {domain_or_url}")
+                    print(f"✅ Login successful! Session saved for {domain}")
+                    # Reset circuit breaker on success
+                    self._login_circuit_breaker.pop(domain, None)
+                    self._login_backoff_until.pop(domain, None)
                 except Exception:
                     pass
                 return True
-            # Feedback after failed attempt
+                
+            # Track failed attempt
+            self._login_circuit_breaker[domain] = failures + attempts
+            
+            # Provide feedback after failed attempt
             if not ok:
                 try:
                     remaining = max(0, int(deadline - self._now()))
-                    print(f"⚠️  Login not detected yet. {remaining}s left; will retry if attempts remain...")
+                    print(f"⚠️  Login attempt {attempts} failed. {remaining}s left; will retry if attempts remain...")
                 except Exception:
                     pass
         
-        # Final check
+        # Final check after all attempts
         if self.has_valid_session(domain_or_url):
             try:
-                print(f"✅ Session validated for {domain_or_url}")
+                print(f"✅ Session validated for {domain}")
+                # Reset circuit breaker on success
+                self._login_circuit_breaker.pop(domain, None)
+                self._login_backoff_until.pop(domain, None)
             except Exception:
                 pass
             return True
         else:
+            # Record failure for circuit breaker
+            self._login_circuit_breaker[domain] = failures + attempts
             try:
-                print(f"❌ Failed to establish valid session for {domain_or_url}")
+                total_failures = self._login_circuit_breaker[domain]
+                print(f"❌ Failed to establish valid session for {domain} after {attempts} attempts (total failures: {total_failures})")
+                log.error(f"[{domain}] Login failed after {attempts} attempts. Total failures: {total_failures}")
             except Exception:
                 pass
             return False

@@ -1899,3 +1899,284 @@ def detect_anomalies(
 		typer.echo("❌ Anomaly detection not available. Install scikit-learn and dependencies")
 	except Exception as e:
 		typer.echo(f"❌ Anomaly detection failed: {e}")
+
+
+@app.command()
+def doctor():
+	"""🩺 Diagnose BAC Hunter installation and configuration issues"""
+	try:
+		from .user_guidance import guidance_system
+		import sys
+		import subprocess
+		
+		typer.echo("🩺 BAC Hunter Health Check")
+		typer.echo("=" * 50)
+		
+		# Check Python version
+		python_version = sys.version_info
+		typer.echo(f"🐍 Python Version: {python_version.major}.{python_version.minor}.{python_version.micro}")
+		if python_version < (3, 8):
+			typer.echo("⚠️  Warning: Python 3.8+ recommended")
+		else:
+			typer.echo("✅ Python version OK")
+		
+		# Check dependencies
+		required_packages = [
+			("httpx", "HTTP client"),
+			("typer", "CLI framework"),
+			("playwright", "Browser automation"),
+			("pydantic", "Data validation")
+		]
+		
+		typer.echo("\n📦 Dependencies:")
+		for package, description in required_packages:
+			try:
+				__import__(package)
+				typer.echo(f"✅ {package} - {description}")
+			except ImportError:
+				typer.echo(f"❌ {package} - {description} (MISSING)")
+		
+		# Check Playwright browsers
+		typer.echo("\n🌐 Browser Support:")
+		try:
+			from playwright.async_api import async_playwright
+			typer.echo("✅ Playwright installed")
+			
+			# Try to check installed browsers
+			try:
+				result = subprocess.run(["playwright", "list"], capture_output=True, text=True)
+				if "chromium" in result.stdout.lower():
+					typer.echo("✅ Chromium browser available")
+				else:
+					typer.echo("⚠️  Chromium browser not installed (run: playwright install chromium)")
+			except Exception:
+				typer.echo("⚠️  Cannot check browser installation")
+				
+		except ImportError:
+			typer.echo("❌ Playwright not installed")
+		
+		# Check configuration
+		typer.echo("\n⚙️ Configuration:")
+		try:
+			from .config import Settings
+			settings = Settings()
+			typer.echo("✅ Configuration loaded successfully")
+			
+			# Check sessions directory
+			import os
+			if os.path.exists(settings.sessions_dir):
+				typer.echo(f"✅ Sessions directory exists: {settings.sessions_dir}")
+			else:
+				typer.echo(f"⚠️  Sessions directory will be created: {settings.sessions_dir}")
+				
+		except Exception as e:
+			typer.echo(f"❌ Configuration error: {e}")
+		
+		# Check network connectivity
+		typer.echo("\n🌐 Network Connectivity:")
+		try:
+			import httpx
+			import asyncio
+			
+			async def test_connectivity():
+				async with httpx.AsyncClient() as client:
+					try:
+						resp = await client.get("https://httpbin.org/get", timeout=10)
+						return resp.status_code == 200
+					except Exception:
+						return False
+			
+			if asyncio.run(test_connectivity()):
+				typer.echo("✅ Internet connectivity OK")
+			else:
+				typer.echo("⚠️  Internet connectivity issues detected")
+		except Exception:
+			typer.echo("⚠️  Cannot test connectivity")
+		
+		typer.echo("\n🎯 Recommendations:")
+		typer.echo("• Run 'playwright install' to install browsers")
+		typer.echo("• Run 'python -m bac_hunter setup-wizard' for guided setup")
+		typer.echo("• Check firewall settings if connectivity issues persist")
+		
+	except Exception as e:
+		from .user_guidance import handle_error_with_guidance
+		typer.echo(handle_error_with_guidance(e, "doctor_command"))
+
+
+@app.command()
+def help_topic(
+	topic: str = typer.Argument(help="Help topic (scan, login, authentication, etc.)")
+):
+	"""📚 Get detailed help for specific topics"""
+	try:
+		from .user_guidance import get_contextual_help
+		
+		help_content = get_contextual_help(topic)
+		typer.echo(help_content)
+		
+	except Exception as e:
+		typer.echo(f"❌ Error getting help: {e}")
+		typer.echo("Available topics: scan, login, authentication, configuration")
+
+
+@app.command()
+def session_info(
+	target: str = typer.Argument(help="Target URL to check session for")
+):
+	"""🔍 Show detailed session information for a target"""
+	try:
+		from .session_manager import SessionManager
+		from .config import Settings
+		
+		s = Settings()
+		sm = SessionManager()
+		sm.configure(sessions_dir=s.sessions_dir)
+		
+		# Initialize from persistent store
+		sm.initialize_from_persistent_store()
+		
+		info = sm.get_session_info(target)
+		
+		typer.echo("🔍 Session Information")
+		typer.echo("=" * 40)
+		typer.echo(f"Target: {target}")
+		typer.echo(f"Valid Session: {'✅ Yes' if info.get('is_valid') else '❌ No'}")
+		typer.echo(f"Cookie Count: {info.get('cookie_count', 0)}")
+		typer.echo(f"Valid Cookies: {info.get('valid_cookies', 0)}")
+		typer.echo(f"Bearer Token: {'✅ Present' if info.get('has_bearer') else '❌ None'}")
+		typer.echo(f"CSRF Token: {'✅ Present' if info.get('has_csrf') else '❌ None'}")
+		
+		if info.get('cookies'):
+			typer.echo("\n🍪 Cookies:")
+			for cookie in info['cookies'][:5]:  # Show first 5
+				name = cookie.get('name', 'unknown')
+				domain = cookie.get('domain', 'unknown')
+				typer.echo(f"  • {name} (domain: {domain})")
+				
+		if not info.get('is_valid'):
+			typer.echo("\n💡 Suggestions:")
+			typer.echo("• Run login command: python -m bac_hunter login " + target)
+			typer.echo("• Clear sessions and retry: python -m bac_hunter clear-sessions")
+		
+	except Exception as e:
+		from .user_guidance import handle_error_with_guidance
+		typer.echo(handle_error_with_guidance(e, "session_info"))
+
+
+@app.command()
+def clear_sessions():
+	"""🗑️ Clear all stored session data"""
+	try:
+		from .session_manager import SessionManager
+		from .config import Settings
+		import os
+		import shutil
+		
+		s = Settings()
+		sm = SessionManager()
+		
+		# Clear session manager data
+		sm.clear_expired_sessions()
+		
+		# Remove sessions directory
+		if os.path.exists(s.sessions_dir):
+			shutil.rmtree(s.sessions_dir)
+			typer.echo(f"✅ Removed sessions directory: {s.sessions_dir}")
+		
+		# Remove auth data file
+		auth_file = "auth_data.json"
+		if os.path.exists(auth_file):
+			os.remove(auth_file)
+			typer.echo(f"✅ Removed auth data file: {auth_file}")
+		
+		typer.echo("🗑️ All session data cleared successfully")
+		
+	except Exception as e:
+		from .user_guidance import handle_error_with_guidance
+		typer.echo(handle_error_with_guidance(e, "clear_sessions"))
+
+
+@app.command()
+def connectivity_test(
+	target: str = typer.Argument(help="Target URL to test connectivity")
+):
+	"""🌐 Test network connectivity to target"""
+	try:
+		import httpx
+		import asyncio
+		from urllib.parse import urlparse
+		import time
+		
+		typer.echo(f"🌐 Testing connectivity to: {target}")
+		typer.echo("=" * 50)
+		
+		parsed = urlparse(target)
+		host = parsed.netloc or parsed.path
+		
+		async def test_connection():
+			results = {}
+			
+			# Basic HTTP test
+			try:
+				start = time.time()
+				async with httpx.AsyncClient() as client:
+					resp = await client.get(target, timeout=10)
+					elapsed = time.time() - start
+					results['http'] = {
+						'status': resp.status_code,
+						'time': elapsed,
+						'success': True
+					}
+			except Exception as e:
+				results['http'] = {
+					'error': str(e),
+					'success': False
+				}
+			
+			# DNS resolution test
+			try:
+				import socket
+				start = time.time()
+				socket.gethostbyname(host)
+				elapsed = time.time() - start
+				results['dns'] = {
+					'time': elapsed,
+					'success': True
+				}
+			except Exception as e:
+				results['dns'] = {
+					'error': str(e),
+					'success': False
+				}
+			
+			return results
+		
+		results = asyncio.run(test_connection())
+		
+		# Display results
+		if results['dns']['success']:
+			typer.echo(f"✅ DNS Resolution: {results['dns']['time']:.2f}s")
+		else:
+			typer.echo(f"❌ DNS Resolution: {results['dns']['error']}")
+		
+		if results['http']['success']:
+			typer.echo(f"✅ HTTP Connection: {results['http']['status']} ({results['http']['time']:.2f}s)")
+		else:
+			typer.echo(f"❌ HTTP Connection: {results['http']['error']}")
+		
+		# Recommendations
+		if not results['dns']['success']:
+			typer.echo("\n💡 DNS Issues:")
+			typer.echo("• Check if the domain name is correct")
+			typer.echo("• Try using a different DNS server")
+			typer.echo("• Check if you're behind a corporate firewall")
+		
+		if not results['http']['success']:
+			typer.echo("\n💡 Connection Issues:")
+			typer.echo("• Check if the URL is correct and accessible")
+			typer.echo("• Try with different timeout: --timeout 30")
+			typer.echo("• Consider using a proxy if behind firewall")
+		
+	except Exception as e:
+		from .user_guidance import handle_error_with_guidance
+		typer.echo(handle_error_with_guidance(e, "connectivity_test"))
