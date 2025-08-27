@@ -6,6 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+# Import our new anomaly detection module
+try:
+    from .anomaly_detection import AnomalyDetector, AnomalyReporter, detect_anomalies_in_responses
+except ImportError:
+    from anomaly_detection import AnomalyDetector, AnomalyReporter, detect_anomalies_in_responses
+
 # Optional joblib; fallback to pickle if unavailable
 try:
 	import joblib as _joblib  # type: ignore
@@ -97,7 +103,10 @@ class BAC_ML_Engine:
 		self.response_classifier: Optional[Any] = None
 		self.endpoint_vulnerability_predictor: Optional[Any] = None
 		self.business_logic_analyzer: Optional[Any] = None
+		self.anomaly_detector: Optional[AnomalyDetector] = None
+		self.anomaly_reporter = AnomalyReporter()
 		self._load_models()
+		self._init_anomaly_detector()
 
 	def _load_models(self):
 		for attr, path in (
@@ -144,6 +153,15 @@ class BAC_ML_Engine:
 			self.response_classifier = IsolationForest(n_estimators=100, contamination=0.05, random_state=42)
 		except Exception as e:
 			log.debug("Failed to init response classifier: %s", e)
+
+	def _init_anomaly_detector(self):
+		"""Initialize the anomaly detection system"""
+		try:
+			self.anomaly_detector = AnomalyDetector(contamination=0.1)
+			log.info("Anomaly detector initialized successfully")
+		except Exception as e:
+			log.warning("Failed to initialize anomaly detector: %s", e)
+			self.anomaly_detector = None
 
 	async def train_endpoint_predictor(self):
 		"""Train a simple endpoint predictor based on stored findings and URLs."""
@@ -404,6 +422,61 @@ class BusinessContextAI:
 				impact = 0.9
 			mapped.append({"process": bp.get("name"), "impact": impact})
 		return mapped
+
+	async def detect_response_anomalies(self, responses: List[Dict[str, Any]], 
+	                                   baseline_responses: List[Dict[str, Any]] = None):
+		"""Detect anomalies in HTTP responses using AI"""
+		if not self.anomaly_detector:
+			log.warning("Anomaly detector not available")
+			return []
+		
+		try:
+			# Establish baseline if provided
+			if baseline_responses:
+				self.anomaly_detector.establish_baseline(baseline_responses)
+			
+			# Detect anomalies
+			anomalies = self.anomaly_detector.detect_anomalies(responses)
+			
+			log.info(f"Detected {len(anomalies)} anomalies in {len(responses)} responses")
+			return anomalies
+			
+		except Exception as e:
+			log.error(f"Error in anomaly detection: {e}")
+			return []
+
+	async def analyze_single_response_anomaly(self, response: Dict[str, Any]):
+		"""Analyze a single response for anomalies"""
+		if not self.anomaly_detector:
+			return None
+		
+		try:
+			return self.anomaly_detector.detect_single_anomaly(response)
+		except Exception as e:
+			log.error(f"Error analyzing response anomaly: {e}")
+			return None
+
+	async def generate_anomaly_report(self, anomalies: List[Any]):
+		"""Generate comprehensive anomaly report"""
+		try:
+			return self.anomaly_reporter.generate_report(anomalies)
+		except Exception as e:
+			log.error(f"Error generating anomaly report: {e}")
+			return {"error": str(e)}
+
+	async def establish_response_baseline(self, baseline_responses: List[Dict[str, Any]]):
+		"""Establish baseline for anomaly detection"""
+		if not self.anomaly_detector:
+			log.warning("Anomaly detector not available")
+			return False
+		
+		try:
+			self.anomaly_detector.establish_baseline(baseline_responses)
+			log.info(f"Established baseline from {len(baseline_responses)} responses")
+			return True
+		except Exception as e:
+			log.error(f"Error establishing baseline: {e}")
+			return False
 
 
 class QuantumReadySecurityAnalyzer:
