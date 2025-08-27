@@ -60,8 +60,13 @@ class SmartEndpointDetector(Plugin):
         except Exception as e:
             log.debug("homepage fetch failed: %s", e)
 
-        # 2) Probe known admin/API candidates conservatively
-        for path in ADMIN_CANDIDATES + API_CANDIDATES:
+        # 2) Probe known admin/API candidates conservatively with deduplication
+        admin_api_candidates = ADMIN_CANDIDATES + API_CANDIDATES
+        # Limit the number of candidates to prevent excessive requests
+        max_candidates = min(20, getattr(self.settings, 'max_endpoint_candidates', 20))
+        admin_api_candidates = admin_api_candidates[:max_candidates]
+        
+        for path in admin_api_candidates:
             url = urljoin(base_url, path)
             try:
                 from ...utils import normalize_url, is_recursive_duplicate_path
@@ -91,8 +96,12 @@ class SmartEndpointDetector(Plugin):
                 continue
 
         # 3) Persist findings with basic risk scoring
-        for u in sorted(collected):
+        # Limit the total number of endpoints to prevent database bloat
+        max_endpoints = min(100, getattr(self.settings, 'max_endpoints_per_target', 100))
+        collected_list = sorted(collected)[:max_endpoints]
+        
+        for u in collected_list:
             score = 0.6 if any(seg in u.lower() for seg in ("/admin", "/manage", "/dashboard", "/internal")) else 0.4
             self.db.add_finding(target_id, "endpoint", u, evidence="smart-detector", score=score)
-        log.info("%s -> %d endpoints", self.name, len(collected))
-        return sorted(collected)
+        log.info("%s -> %d endpoints", self.name, len(collected_list))
+        return collected_list

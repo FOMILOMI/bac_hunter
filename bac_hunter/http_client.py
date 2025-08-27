@@ -406,7 +406,9 @@ class HttpClient:
                     return cached
             await self._respect_limits(host)
             last_exc: Optional[Exception] = None
-            for attempt in range(self.s.retry_times + 1):
+            # Add maximum retry attempts to prevent infinite loops
+            max_attempts = min(self.s.retry_times + 1, 5)  # Cap at 5 total attempts
+            for attempt in range(max_attempts):
                 start = time.perf_counter()
                 try:
                     r = await self._client.request(method, url, headers=h, data=data, json=json)
@@ -572,10 +574,11 @@ class HttpClient:
                     elapsed_ms = (time.perf_counter() - start) * 1000.0
                     self._record(url, method.upper(), 599, elapsed_ms, 0, h.get("X-BH-Identity", "unknown"))
                     last_exc = e
-                    if attempt >= self.s.retry_times:
+                    if attempt >= max_attempts - 1:
                         break
-                    # exponential backoff + jitter
-                    await asyncio.sleep(min(2.0, 0.5 * (2 ** attempt)))
+                    # exponential backoff + jitter with maximum delay cap
+                    max_delay = min(10.0, 0.5 * (2 ** attempt))  # Cap delay at 10 seconds
+                    await asyncio.sleep(max_delay)
             assert last_exc is not None
             raise last_exc
 

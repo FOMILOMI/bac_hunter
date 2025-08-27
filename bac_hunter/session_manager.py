@@ -673,10 +673,13 @@ class SessionManager:
         attempts = 0
         deadline = self._now() + max(self._login_timeout_seconds, self._overall_login_timeout_seconds)
         
-        while (attempts < self._max_login_retries) and (self._now() < deadline) and not self.has_valid_session(domain_or_url):
+        # Add maximum attempts cap to prevent infinite loops
+        max_attempts = min(self._max_login_retries, 3)  # Cap at 3 attempts
+        
+        while (attempts < max_attempts) and (self._now() < deadline) and not self.has_valid_session(domain_or_url):
             attempts += 1
             try:
-                print(f"🔐 Attempt {attempts}/{self._max_login_retries}: Opening browser for login to {domain}...")
+                print(f"🔐 Attempt {attempts}/{max_attempts}: Opening browser for login to {domain}...")
             except Exception:
                 pass
                 
@@ -713,6 +716,14 @@ class SessionManager:
                     print(f"⚠️  Login attempt {attempts} failed. {remaining}s left; will retry if attempts remain...")
                 except Exception:
                     pass
+            
+            # Check if we've exceeded the deadline
+            if self._now() >= deadline:
+                try:
+                    print(f"⏰ Login deadline exceeded for {domain}. Stopping retries.")
+                except Exception:
+                    pass
+                break
         
         # Final check after all attempts
         if self.has_valid_session(domain_or_url):
