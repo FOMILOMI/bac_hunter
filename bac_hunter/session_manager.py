@@ -46,6 +46,12 @@ class SessionManager:
         # Internal clock helper
         import time as _t  # lazy to avoid global import noise
         self._now = _t.time
+        # Global auth store path (auth_data.json via env in module)
+        try:
+            from .auth_store import DEFAULT_AUTH_PATH as _ap
+            self._auth_store_path = _ap
+        except Exception:
+            self._auth_store_path = "auth_data.json"
 
     def configure(self, *, sessions_dir: str, browser_driver: Optional[str] = None, login_timeout_seconds: Optional[int] = None, enable_semi_auto_login: Optional[bool] = None, max_login_retries: Optional[int] = None, overall_login_timeout_seconds: Optional[int] = None):
         import os
@@ -413,6 +419,33 @@ class SessionManager:
     # ---- Interactive pre-login helpers ----
     def has_valid_session(self, domain_or_url: str) -> bool:
         """Check if we have any non-expired cookie or a bearer token for the domain."""
+        # Prefer global auth store if present and valid; hydrate per-domain cache lazily
+        try:
+            from .auth_store import read_auth, is_auth_still_valid
+        except Exception:
+            from auth_store import read_auth, is_auth_still_valid
+        try:
+            data = read_auth(self._auth_store_path)
+            if data and is_auth_still_valid(data):
+                # Hydrate per-domain cache so subsequent attach uses it seamlessly
+                dom = domain_or_url
+                try:
+                    if "://" in domain_or_url:
+                        dom = self._hostname_from_url(domain_or_url) or ""
+                except Exception:
+                    pass
+                if dom:
+                    try:
+                        cookies = data.get("cookies") or []
+                        bearer = data.get("bearer") or data.get("token")
+                        csrf = data.get("csrf")
+                        storage = data.get("storage")
+                        self.save_domain_session(dom, cookies, bearer, csrf, storage)
+                    except Exception:
+                        pass
+                return True
+        except Exception:
+            pass
         dom = domain_or_url
         try:
             if "://" in domain_or_url:
@@ -453,7 +486,12 @@ class SessionManager:
         # Short-circuit in offline/CI mode
         if not self._enable_semi_auto_login:
             return False
+        # If global auth store is valid, skip browser entirely
         if self.has_valid_session(domain_or_url):
+            try:
+                print("Reusing saved auth_data.json; skipping browser login")
+            except Exception:
+                pass
             return True
         # Bounded retries with overall timeout to avoid infinite loops
         attempts = 0
@@ -576,6 +614,30 @@ class SessionManager:
                         print(f"[debug] Session saved for {domain}")
                     except Exception:
                         pass
+                # Also persist to global auth_data.json so next runs can skip browser
+                try:
+                    from .auth_store import write_auth
+                except Exception:
+                    from auth_store import write_auth
+                try:
+                    # Build a headers snapshot
+                    cookie_header = self._cookie_header_from_cookies(cookies or [])
+                    hdrs = {}
+                    if cookie_header:
+                        hdrs["Cookie"] = cookie_header
+                    if bearer:
+                        hdrs["Authorization"] = f"Bearer {bearer}"
+                    data = {
+                        "cookies": cookies or [],
+                        "bearer": bearer,
+                        "csrf": csrf,
+                        "headers": hdrs,
+                        "storage": storage or None,
+                        # optional token exp could be set by custom extractors in the future
+                    }
+                    write_auth(data, self._auth_store_path)
+                except Exception:
+                    pass
                 return True
         except Exception:
             pass
