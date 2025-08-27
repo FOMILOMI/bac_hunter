@@ -330,81 +330,55 @@ class PlaywrightDriver:
 				print(f"[ERROR] Failed to navigate to {url}: {e}")
 
 	async def wait_for_manual_login(self, timeout_seconds: int = 180) -> bool:
+		"""Wait for manual login completion with improved detection logic."""
 		if not self._page:
 			return False
 
-		import asyncio, re, os
-		login_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.I)
-
 		try:
+			import asyncio
+			import os
+			import re
+
+			# Heuristic: wait for clear signs of authentication, not just any cookie
+			login_like = ["login", "signin", "sign-in", "account", "user/login", "users/sign_in", "auth", "session", "sso"]
 			start_url = self._page.url
-		except Exception:
-			start_url = ""
+			success_selector = os.getenv("BH_LOGIN_SUCCESS_SELECTOR", "").strip() or None
+			cookie_names_env = os.getenv("BH_AUTH_COOKIE_NAMES", "").strip()
+			default_cookie_names = [
+				"sessionid", "session_id", "session", "_session", "sid", "connect.sid",
+				"auth", "auth_token", "token", "jwt", "access_token"
+			]
+			auth_cookie_names = [c.strip().lower() for c in (cookie_names_env.split(",") if cookie_names_env else default_cookie_names) if c.strip()]
 
-		print(f"[browser] Please complete login - you have {timeout_seconds} seconds...")
-		await self._inject_browser_guidance(timeout_seconds)
-
-		deadline = asyncio.get_event_loop().time() + timeout_seconds
-		last_report = 0
-
-		# Optional explicit success selector and auth cookie names from env
-		success_selector = os.getenv("BH_LOGIN_SUCCESS_SELECTOR", "").strip() or None
-		cookie_names_env = os.getenv("BH_AUTH_COOKIE_NAMES", "").strip()
-		default_cookie_names = [
-			"sessionid", "session_id", "session", "_session", "sid", "connect.sid",
-			"auth", "auth_token", "token", "jwt", "access_token"
-		]
-		auth_cookie_names = [c.strip().lower() for c in (cookie_names_env.split(",") if cookie_names_env else default_cookie_names) if c.strip()]
-
-		# Require stability window before concluding login success
-		stable_seconds = max(1, int(os.getenv("BH_LOGIN_STABLE_SECONDS", "2") or "2"))
-
-		async def has_auth_cookie() -> bool:
-			try:
-				if not self._ctx:
-					return False
-				cookies = await self._ctx.cookies()
-				for c in cookies or []:
-					name = str(c.get("name") or "").lower()
-					if not name:
-						continue
-					if name in auth_cookie_names or any(n in name for n in auth_cookie_names):
-						return True
-				return False
-			except Exception:
-				return False
-
-		stable_start: float | None = None
-		while True:
-			now = asyncio.get_event_loop().time()
-			if now >= deadline:
-				return False
-
-			remaining = int(deadline - now)
-
-			# Progress reporting
-			if remaining // 10 != last_report // 10:
-				print(f"[waiting] Monitoring for authentication... {remaining}s remaining")
-				last_report = remaining
-
-			# Check login completion
-			try:
-				# URL check
-				url_now = self._page.url or ""
-				path = url_now
+			async def has_auth_cookie() -> bool:
 				try:
-					from urllib.parse import urlparse
-					path = urlparse(url_now).path or url_now
+					if self._ctx:
+						cookies = await self._ctx.cookies()
+						for c in cookies or []:
+							name = str(c.get("name") or "").lower()
+							if not name:
+								continue
+							if name in auth_cookie_names or any(n in name for n in auth_cookie_names):
+								return True
+					return False
 				except Exception:
-					pass
+					return False
 
-				url_ok = bool(url_now) and (url_now != start_url) and (login_re.search(path) is None)
+			async def has_logout_element() -> bool:
+				try:
+					logout_locator = self._page.locator("a:has-text('Logout'), button:has-text('Logout'), a:has-text('Sign out'), button:has-text('Sign out'), a:has-text('Log out'), button:has-text('Log out')")
+					return (await logout_locator.count()) > 0
+				except Exception:
+					return False
 
-				# Cookies check (auth-like cookies only)
-				cookies_ok = await has_auth_cookie()
+			async def has_user_profile_element() -> bool:
+				try:
+					profile_locator = self._page.locator("a:has-text('Profile'), a:has-text('Account'), a:has-text('Settings'), a:has-text('Dashboard'), a:has-text('My Account')")
+					return (await profile_locator.count()) > 0
+				except Exception:
+					return False
 
-				# Token check
-				token_ok = False
+			async def has_bearer_token() -> bool:
 				try:
 					js = r"""
 					(() => {
@@ -421,38 +395,97 @@ class PlaywrightDriver:
 						return false;
 					})()
 					"""
-					token_ok = await self._page.evaluate(js)
+					return await self._page.evaluate(js)
 				except Exception:
-					pass
+					return False
 
-				# Logged-in UI indicator: explicit selector or common logout texts
-				selector_ok = False
+			# Improved login detection with multiple criteria
+			start_time = asyncio.get_event_loop().time()
+			stable_start = None
+			stable_seconds = 3  # Require 3 seconds of stable login state
+			login_re = re.compile(r"/(login|signin|sign-in|account|user/login|users/sign_in|auth|session|sso)\b", re.IGNORECASE)
+
+			while (asyncio.get_event_loop().time() - start_time) < timeout_seconds:
 				try:
-					if success_selector:
-						locator = self._page.locator(success_selector)
-						selector_ok = (await locator.count()) > 0
-					else:
-						logout_locator = self._page.locator("a:has-text('Logout'), button:has-text('Logout'), a:has-text('Sign out'), button:has-text('Sign out')")
-						selector_ok = (await logout_locator.count()) > 0
-				except Exception:
+					now = asyncio.get_event_loop().time()
+					
+					# URL change away from login-like paths
+					url_now = self._page.url or ""
+					url_ok = bool(url_now) and (url_now != start_url) and (login_re.search(url_now) is None)
+
+					# Cookies check (any valid cookies, not just auth-specific ones)
+					cookies_ok = False
+					try:
+						if self._ctx:
+							cookies = await self._ctx.cookies()
+							cookies_ok = len(cookies or []) > 0
+					except Exception:
+						pass
+
+					# Token check
+					token_ok = await has_bearer_token()
+
+					# Logged-in UI indicators
+					logout_ok = await has_logout_element()
+					profile_ok = await has_user_profile_element()
 					selector_ok = False
+					try:
+						if success_selector:
+							locator = self._page.locator(success_selector)
+							selector_ok = (await locator.count()) > 0
+					except Exception:
+						pass
 
-				# Stronger success criteria and stability requirement
-				strong_ok = bool(selector_ok or (url_ok and (token_ok or cookies_ok)))
-				if strong_ok:
-					if stable_start is None:
-						stable_start = now
-					elif (now - stable_start) >= stable_seconds:
-						print("[success] Login confirmed. Capturing session data...")
-						await asyncio.sleep(1)
-						return True
-				else:
-					stable_start = None
+					# Multiple success criteria - any combination suggests login
+					success_indicators = [
+						url_ok,
+						cookies_ok,
+						token_ok,
+						logout_ok,
+						profile_ok,
+						selector_ok
+					]
+					
+					# Require at least 2 indicators for stability
+					strong_ok = sum(success_indicators) >= 2
+					
+					if strong_ok:
+						if stable_start is None:
+							stable_start = now
+							try:
+								print("🔍 Login indicators detected, waiting for stability...")
+							except Exception:
+								pass
+						elif (now - stable_start) >= stable_seconds:
+							try:
+								print("✅ Login confirmed! Capturing session data...")
+							except Exception:
+								pass
+							await asyncio.sleep(1)  # Give a moment for any final page loads
+							return True
+					else:
+						stable_start = None
 
-			except Exception as e:
-				print(f"[debug] Login check error: {e}")
+				except Exception as e:
+					try:
+						print(f"⚠️  Login check error: {e}")
+					except Exception:
+						pass
 
-			await asyncio.sleep(0.5)
+				await asyncio.sleep(0.5)
+
+			try:
+				print(f"⏰ Login timeout after {timeout_seconds}s")
+			except Exception:
+				pass
+			return False
+
+		except Exception as e:
+			try:
+				print(f"❌ Login wait error: {e}")
+			except Exception:
+				pass
+			return False
 
 	async def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None, dict | None]:
 		cookies: list = []
