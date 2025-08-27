@@ -363,20 +363,38 @@ class IDORProbe:
 			candidates.extend(self._inject_identity_values(base_n, low_priv, other_priv))
 		except Exception:
 			pass
-		# Fallback to heuristic variants
-		for v in self.variants(base_url, base_n):
-			if v not in candidates:
+		# Fallback to heuristic variants with deduplication
+		variants = self.variants(base_url, base_n)
+		# Limit variants to prevent excessive requests
+		max_variants = min(8, getattr(self.s, 'max_idor_variants', 8))
+		variants = variants[:max_variants]
+		
+		# Deduplicate candidates to avoid testing the same URL multiple times
+		seen_urls = {base_n}
+		for v in variants:
+			if v not in seen_urls and v not in candidates:
 				candidates.append(v)
+				seen_urls.add(v)
+		
+		# Limit total candidates to prevent excessive requests
+		max_candidates = min(12, getattr(self.s, 'max_idor_candidates', 12))
+		candidates = candidates[:max_candidates]
+		
 		for v in candidates:
+			# Skip if we've already tested this URL
+			if v in seen_urls and v != base_n:
+				continue
+			seen_urls.add(v)
+			
 			rv = await self.http.get(v, headers=low_priv.headers(), context="idor:variant:low")
 			el_v = getattr(rv, 'elapsed', 0.0) if hasattr(rv, 'elapsed') else 0.0
-			self.db.save_probe_ext(url=v, identity=low_priv.name, status=rv.status_code, length=len(rv.content), content_type=rv.headers.get("content-type"), body=b"", elapsed_ms=float(el_v), headers=dict(rv.headers))
+			self.db.save_probe_ext(url=v, identity=low_priv.name, status=rv.status_code, length=rv.content, content_type=rv.headers.get("content-type"), body=b"", elapsed_ms=float(el_v), headers=dict(rv.headers))
 			if getattr(self.s, 'smart_backoff_enabled', False) and rv.status_code == 429:
 				log.warning("[!] Rate limited (429) on %s, backing off", v)
 				await asyncio.sleep(2.0)
 			ro = await self.http.get(v, headers=other_priv.headers(), context="idor:variant:other")
 			el_o = getattr(ro, 'elapsed', 0.0) if hasattr(ro, 'elapsed') else 0.0
-			self.db.save_probe_ext(url=v, identity=other_priv.name, status=ro.status_code, length=len(ro.content), content_type=ro.headers.get("content-type"), body=b"", elapsed_ms=float(el_o), headers=dict(ro.headers))
+			self.db.save_probe_ext(url=v, identity=other_priv.name, status=ro.status_code, length=ro.content, content_type=ro.headers.get("content-type"), body=b"", elapsed_ms=float(el_o), headers=dict(ro.headers))
 			if getattr(self.s, 'smart_backoff_enabled', False) and ro.status_code == 429:
 				log.warning("[!] Rate limited (429) on %s (other), backing off", v)
 				await asyncio.sleep(2.0)
@@ -392,11 +410,11 @@ class IDORProbe:
 			resp_rows.append({
 				"url": v,
 				"status": rv.status_code,
-				"length": len(rv.content),
+				"length": rv.content,
 				"content_type": rv.headers.get("content-type", ""),
 				"elapsed_ms": float(el_v) if el_v else 0.0,
 				"prev_status": r0.status_code,
-				"prev_length": len(r0.content),
+				"prev_length": r0.content,
 			})
 			# Positive/negative control gate
 			allow_low = (200 <= rv.status_code < 300)
@@ -410,7 +428,8 @@ class IDORProbe:
 			if allow_low and (not diff.same_status or not diff.same_length_bucket or diff.hint in ("header-diff","cookie-changed","timing-diff","html-diff")):
 				# Confirmation retry if configured
 				confirmed = True
-				for _ in range(max(0, int(getattr(self.s, 'confirm_retries', 1)))):
+				max_confirm_retries = max(0, int(getattr(self.s, 'confirm_retries', 1)))
+				for _ in range(max_confirm_retries):
 					await asyncio.sleep(float(getattr(self.s, 'max_confirmation_delay_s', 1.0)))
 					re_rv = await self.http.get(v, headers=low_priv.headers(), context="idor:confirm:low")
 					re_ro = await self.http.get(v, headers=other_priv.headers(), context="idor:confirm:other")

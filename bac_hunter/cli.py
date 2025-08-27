@@ -144,7 +144,10 @@ def recon(
     db = Storage(settings.db_path)
     sm = SessionManager()
     # Initialize from persistent auth store if available
-    sm.initialize_from_persistent_store()
+    try:
+        sm.initialize_from_persistent_store()
+    except Exception as e:
+        logging.warning(f"Failed to initialize from persistent store: {e}")
 
     async def run_all():
         http = HttpClient(settings)
@@ -152,42 +155,55 @@ def recon(
             # attach session manager for semi-auto login
             try:
                 http.attach_session_manager(sm)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Failed to attach session manager: {e}")
             # Pre-login for all targets (opens browser if missing/expired)
             try:
                 sm.prelogin_targets(settings.targets)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Pre-login failed: {e}")
             for base in settings.targets:
-                tid = db.ensure_target(base)
-                plugins = []
-                if settings.enable_recon_robots:
-                    plugins.append(RobotsRecon(settings, http, db))
-                if settings.enable_recon_sitemap:
-                    plugins.append(SitemapRecon(settings, http, db))
-                if settings.enable_recon_js_endpoints:
-                    plugins.append(JSEndpointsRecon(settings, http, db))
-                # Smart endpoint detection
-                plugins.append(SmartEndpointDetector(settings, http, db))
-                # OpenAPI when enabled
-                if settings.enable_recon_openapi:
-                    plugins.append(OpenAPIRecon(settings, http, db))
-                # Auth discovery
-                plugins.append(AuthDiscoveryRecon(settings, http, db))
-                # Optional GraphQL testing
-                if graphql_test:
-                    plugins.append(GraphQLTester(settings, http, db))
+                try:
+                    tid = db.ensure_target(base)
+                    plugins = []
+                    if settings.enable_recon_robots:
+                        plugins.append(RobotsRecon(settings, http, db))
+                    if settings.enable_recon_sitemap:
+                        plugins.append(SitemapRecon(settings, http, db))
+                    if settings.enable_recon_js_endpoints:
+                        plugins.append(JSEndpointsRecon(settings, http, db))
+                    # Smart endpoint detection
+                    plugins.append(SmartEndpointDetector(settings, http, db))
+                    # OpenAPI when enabled
+                    if settings.enable_recon_openapi:
+                        plugins.append(OpenAPIRecon(settings, http, db))
+                    # Auth discovery
+                    plugins.append(AuthDiscoveryRecon(settings, http, db))
+                    # Optional GraphQL testing
+                    if graphql_test:
+                        plugins.append(GraphQLTester(settings, http, db))
 
-                for p in plugins:
-                    try:
-                        await p.run(base, tid)
-                    except Exception as e:
-                        logging.getLogger(p.name).warning("plugin failed: %s", e)
+                    for p in plugins:
+                        try:
+                            await p.run(base, tid)
+                        except Exception as e:
+                            logging.getLogger(p.name).warning("plugin failed: %s", e)
+                            # Continue with other plugins instead of crashing
+                            continue
+                except Exception as e:
+                    logging.error(f"Failed to process target {base}: {e}")
+                    # Continue with other targets instead of crashing
+                    continue
         finally:
             await http.close()
 
-    asyncio.run(run_all())
+    try:
+        asyncio.run(run_all())
+    except KeyboardInterrupt:
+        typer.echo("\n[!] Recon interrupted by user")
+    except Exception as e:
+        typer.echo(f"\n[!] Recon failed: {e}")
+        raise typer.Exit(1)
 
 
 @app.command(help="One-click smart auto scan: profile -> recon -> auth-intel -> access (light)")
@@ -243,65 +259,91 @@ def smart_auto(
             try:
                 http.attach_session_manager(sm)
                 sm.prelogin_targets(settings.targets)
-            except Exception:
-                pass
+            except Exception as e:
+                logging.warning(f"Session manager setup failed: {e}")
             for base in settings.targets:
-                tid = db.ensure_target(base)
-                # 1) Profile
-                prof = await profiler.profile(base, unauth)
-                typer.echo(f"[profile] kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
-                # 2) Recon (robots/sitemap/js + smart + auth discovery)
-                for p in (
-                    RobotsRecon(settings, http, db),
-                    SitemapRecon(settings, http, db),
-                    JSEndpointsRecon(settings, http, db),
-                    SmartEndpointDetector(settings, http, db),
-                    *( [OpenAPIRecon(settings, http, db)] if settings.enable_recon_openapi else [] ),
-                    AuthDiscoveryRecon(settings, http, db),
-                ):
+                try:
+                    tid = db.ensure_target(base)
+                    # 1) Profile
                     try:
-                        await p.run(base, tid)
-                    except Exception:
-                        pass
-                # 3) Auth intelligence
-                autheng = AutonomousAuthEngine(settings, http, db)
-                credeng = CredentialInferenceEngine(settings, db)
-                intel = await autheng.discover(base, unauth, auth)
-                # persist summary as findings
-                for u in intel.login_urls:
-                    db.add_finding(tid, "auth_login", u, evidence="smart-auto", score=0.6)
-                for u in intel.oauth_urls:
-                    db.add_finding(tid, "auth_oauth_endpoint", u, evidence="smart-auto", score=0.7)
-                # session hint
-                if intel.session_token_hint:
-                    db.add_finding(tid, "auth_session_hint", base, evidence=intel.session_token_hint, score=0.4)
-                # role map hints
-                for path, mp in intel.role_map.items():
-                    ev = f"unauth={mp.get('unauth',0)} auth={mp.get('auth',0)}"
-                    db.add_finding(tid, "role_boundary", base.rstrip('/')+path, evidence=ev, score=0.35)
-                # 4) Zero-config identity suggestions
-                suggested = credeng.fabricate_identities(credeng.infer_usernames(base))
-                for ident in suggested:
-                    sm.add_identity(ident)
-                # choose a secondary identity if not provided
-                secondary = auth or (suggested[0] if suggested else None)
-                # 5) Light access checks on top endpoints
-                if secondary is not None:
-                    diff = DifferentialTester(settings, http, db)
-                    idor = IDORProbe(settings, http, db)
-                    fb = ForceBrowser(settings, http, db)
-                    urls = list(dict.fromkeys(db.iter_target_urls(tid)))[:40]
-                    for u in urls:
+                        prof = await profiler.profile(base, unauth)
+                        typer.echo(f"[profile] kind={prof.kind} auth={prof.auth_hint or 'n/a'} framework={prof.framework or 'n/a'}")
+                    except Exception as e:
+                        logging.warning(f"Profiling failed for {base}: {e}")
+                        continue
+                    # 2) Recon (robots/sitemap/js + smart + auth discovery)
+                    recon_plugins = [
+                        RobotsRecon(settings, http, db),
+                        SitemapRecon(settings, http, db),
+                        JSEndpointsRecon(settings, http, db),
+                        SmartEndpointDetector(settings, http, db),
+                        *( [OpenAPIRecon(settings, http, db)] if settings.enable_recon_openapi else [] ),
+                        AuthDiscoveryRecon(settings, http, db),
+                    ]
+                    for p in recon_plugins:
                         try:
-                            await diff.compare_identities(u, unauth, secondary)
-                            await idor.test(base, u, unauth, secondary)
-                        except Exception:
+                            await p.run(base, tid)
+                        except Exception as e:
+                            logging.warning(f"Recon plugin {p.name} failed for {base}: {e}")
                             continue
-                    await fb.try_paths(urls[:20], unauth, secondary)
+                    # 3) Auth intelligence
+                    try:
+                        autheng = AutonomousAuthEngine(settings, http, db)
+                        credeng = CredentialInferenceEngine(settings, db)
+                        intel = await autheng.discover(base, unauth, auth)
+                        # persist summary as findings
+                        for u in intel.login_urls:
+                            db.add_finding(tid, "auth_login", u, evidence="smart-auto", score=0.6)
+                        for u in intel.oauth_urls:
+                            db.add_finding(tid, "auth_oauth_endpoint", u, evidence="smart-auto", score=0.7)
+                        # session hint
+                        if intel.session_token_hint:
+                            db.add_finding(tid, "auth_session_hint", base, evidence=intel.session_token_hint, score=0.4)
+                        # role map hints
+                        for path, mp in intel.role_map.items():
+                            ev = f"unauth={mp.get('unauth',0)} auth={mp.get('auth',0)}"
+                            db.add_finding(tid, "role_boundary", base.rstrip('/')+path, evidence=ev, score=0.35)
+                    except Exception as e:
+                        logging.warning(f"Auth intelligence failed for {base}: {e}")
+                    # 4) Zero-config identity suggestions
+                    try:
+                        suggested = credeng.fabricate_identities(credeng.infer_usernames(base))
+                        for ident in suggested:
+                            sm.add_identity(ident)
+                    except Exception as e:
+                        logging.warning(f"Identity suggestion failed for {base}: {e}")
+                    # choose a secondary identity if not provided
+                    secondary = auth or (suggested[0] if suggested else None)
+                    # 5) Light access checks on top endpoints
+                    if secondary is not None:
+                        try:
+                            diff = DifferentialTester(settings, http, db)
+                            idor = IDORProbe(settings, http, db)
+                            fb = ForceBrowser(settings, http, db)
+                            urls = list(dict.fromkeys(db.iter_target_urls(tid)))[:40]
+                            for u in urls:
+                                try:
+                                    await diff.compare_identities(u, unauth, secondary)
+                                    await idor.test(base, u, unauth, secondary)
+                                except Exception as e:
+                                    logging.debug(f"Access check failed for {u}: {e}")
+                                    continue
+                            await fb.try_paths(urls[:20], unauth, secondary)
+                        except Exception as e:
+                            logging.warning(f"Access testing failed for {base}: {e}")
+                except Exception as e:
+                    logging.error(f"Failed to process target {base}: {e}")
+                    continue
         finally:
             await http.close()
 
-    asyncio.run(run_all())
+    try:
+        asyncio.run(run_all())
+    except KeyboardInterrupt:
+        typer.echo("\n[!] Smart auto scan interrupted by user")
+    except Exception as e:
+        typer.echo(f"\n[!] Smart auto scan failed: {e}")
+        raise typer.Exit(1)
 
 
 @app.command(help="One URL, Complete Analysis: zero-config smart scan")

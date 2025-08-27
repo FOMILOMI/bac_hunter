@@ -10,6 +10,8 @@ class TokenBucket:
         self.tokens = burst if burst is not None else max(1.0, rate)
         self.updated = time.perf_counter()
         self.lock = asyncio.Lock()
+        # Add timeout protection to prevent infinite loops
+        self.max_wait_time = 30.0  # Maximum time to wait for tokens
 
     async def take(self, amount: float = 1.0):
         async with self.lock:
@@ -17,14 +19,29 @@ class TokenBucket:
             elapsed = now - self.updated
             self.updated = now
             self.tokens = min(self.tokens + elapsed * self.rate, max(self.rate, 10.0))
+            
+            # Add timeout protection to prevent infinite loops
+            start_time = now
             while self.tokens < amount:
                 need = amount - self.tokens
                 wait = need / self.rate if self.rate > 0 else 0.5
+                
+                # Check if we've been waiting too long
+                if (time.perf_counter() - start_time) > self.max_wait_time:
+                    # Force token generation to prevent infinite loop
+                    self.tokens = max(amount, self.rate)
+                    break
+                
                 await asyncio.sleep(min(0.5, wait))
                 now2 = time.perf_counter()
                 gained = (now2 - self.updated) * self.rate
                 self.tokens += gained
                 self.updated = now2
+                
+                # Additional safety check
+                if self.tokens < 0:
+                    self.tokens = 0
+                    
             self.tokens -= amount
 
 
@@ -55,6 +72,9 @@ class AdaptiveRateLimiter(RateLimiter):
         self._waf_detector = None
         self._host_health = defaultdict(lambda: {"blocks": 0, "last_block": 0, "success_streak": 0})
         self._emergency_throttle = {}
+        # Add circuit breaker to prevent infinite backoff
+        self._circuit_breaker_threshold = 5
+        self._circuit_breaker_reset_time = 300  # 5 minutes
         
     def set_waf_detector(self, waf_detector):
         """Attach WAF detector for intelligent rate adaptation."""
@@ -71,10 +91,13 @@ class AdaptiveRateLimiter(RateLimiter):
             health["last_block"] = now
             health["success_streak"] = 0
             
-            # Trigger emergency throttle
-            if health["blocks"] >= 3:
+            # Trigger emergency throttle with circuit breaker protection
+            if health["blocks"] >= 3 and health["blocks"] < self._circuit_breaker_threshold:
                 emergency_duration = min(300, health["blocks"] * 30)  # Max 5 minutes
                 self._emergency_throttle[host] = now + emergency_duration
+            elif health["blocks"] >= self._circuit_breaker_threshold:
+                # Circuit breaker: stop all requests for this host temporarily
+                self._emergency_throttle[host] = now + self._circuit_breaker_reset_time
                 
         elif 200 <= status_code < 300:
             health["success_streak"] += 1

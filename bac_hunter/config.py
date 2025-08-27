@@ -116,3 +116,11 @@ class Settings:
 
     # CSRF support
     enable_csrf_support: bool = _env("BH_CSRF", "true").lower() == "true"
+
+    # IDOR testing limits to prevent excessive requests
+    max_idor_variants: int = int(_env("BH_MAX_IDOR_VARIANTS", "8"))
+    max_idor_candidates: int = int(_env("BH_MAX_IDOR_CANDIDATES", "12"))
+
+    # Endpoint discovery limits to prevent excessive requests
+    max_endpoint_candidates: int = int(_env("BH_MAX_ENDPOINT_CANDIDATES", "20"))
+    max_endpoints_per_target: int = int(_env("BH_MAX_ENDPOINTS_PER_TARGET", "100"))
