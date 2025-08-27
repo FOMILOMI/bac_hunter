@@ -1,5 +1,6 @@
 from __future__ import annotations
 from typing import Optional
+from urllib.parse import urlparse
 
 
 def validate_playwright() -> bool:
@@ -125,7 +126,22 @@ class SeleniumDriver:
 		except Exception:
 			return False
 
-	def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None, dict | None]:
+	def _normalize_domain(self, domain: Optional[str]) -> str:
+		try:
+			return (domain or "").lower().lstrip(".")
+		except Exception:
+			return domain or ""
+
+	def _domain_match(self, cookie_domain: Optional[str], target_domain: Optional[str]) -> bool:
+		cd = self._normalize_domain(cookie_domain)
+		td = self._normalize_domain(target_domain)
+		if not cd or not td:
+			return False
+		if cd == td:
+			return True
+		return td.endswith("." + cd) or cd.endswith("." + td)
+
+	def extract_cookies_and_tokens(self, target_host: Optional[str] = None) -> tuple[list, str | None, str | None, dict | None]:
 		cookies: list = []
 		bearer: str | None = None
 		csrf: str | None = None
@@ -133,6 +149,9 @@ class SeleniumDriver:
 		try:
 			if self._driver:
 				cookies = self._driver.get_cookies() or []
+				if target_host:
+					th = self._normalize_domain(target_host)
+					cookies = [c for c in cookies if self._domain_match(c.get("domain"), th)]
 				# Try to read tokens from localStorage/sessionStorage via JS
 				js = r"""
 				(() => {
@@ -354,6 +373,14 @@ class PlaywrightDriver:
 				try:
 					if self._ctx:
 						cookies = await self._ctx.cookies()
+						# filter cookies by current host to avoid cross-site signals
+						try:
+							cur_host = urlparse(self._page.url or "").netloc.split("@").pop().split(":")[0]
+							if cur_host:
+								ch = cur_host.lower().lstrip('.')
+								cookies = [c for c in cookies if (c.get("domain") or '').lstrip('.').lower().endswith(ch) or ch.endswith((c.get("domain") or '').lstrip('.').lower())]
+						except Exception:
+							pass
 						for c in cookies or []:
 							name = str(c.get("name") or "").lower()
 							if not name:
@@ -418,6 +445,13 @@ class PlaywrightDriver:
 					try:
 						if self._ctx:
 							cookies = await self._ctx.cookies()
+							try:
+								cur_host = urlparse(self._page.url or "").netloc.split("@").pop().split(":")[0]
+								if cur_host:
+									ch = cur_host.lower().lstrip('.')
+									cookies = [c for c in cookies if (c.get("domain") or '').lstrip('.').lower().endswith(ch) or ch.endswith((c.get("domain") or '').lstrip('.').lower())]
+							except Exception:
+								pass
 							cookies_ok = len(cookies or []) > 0
 					except Exception:
 						pass
@@ -487,7 +521,7 @@ class PlaywrightDriver:
 				pass
 			return False
 
-	async def extract_cookies_and_tokens(self) -> tuple[list, str | None, str | None, dict | None]:
+	async def extract_cookies_and_tokens(self, target_host: Optional[str] = None) -> tuple[list, str | None, str | None, dict | None]:
 		cookies: list = []
 		bearer: str | None = None
 		csrf: str | None = None
@@ -496,6 +530,9 @@ class PlaywrightDriver:
 		try:
 			if self._ctx:
 				cookies = await self._ctx.cookies()
+				if target_host:
+					ch = (target_host or "").lower().lstrip('.')
+					cookies = [c for c in cookies if (c.get("domain") or '').lstrip('.').lower().endswith(ch) or ch.endswith((c.get("domain") or '').lstrip('.').lower())]
 
 			if self._page:
 				# Extract bearer token
@@ -657,7 +694,9 @@ class InteractiveLogin:
 					except Exception:
 						login_ok = False
 					if login_ok:
-						cookies, bearer, csrf, storage = self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+						parsed = urlparse(url)
+						target_host = (parsed.netloc.split("@").pop().split(":")[0] if parsed.netloc else "")
+						cookies, bearer, csrf, storage = self._drv.extract_cookies_and_tokens(target_host)  # type: ignore[attr-defined]
 						self._drv.close()
 						return cookies, bearer, csrf, storage
 					self._drv.close()
@@ -683,7 +722,9 @@ class InteractiveLogin:
 			except Exception:
 				login_ok = False
 			if login_ok:
-				cookies, bearer, csrf, storage = await self._drv.extract_cookies_and_tokens()  # type: ignore[attr-defined]
+				parsed = urlparse(url)
+				target_host = (parsed.netloc.split("@").pop().split(":")[0] if parsed.netloc else "")
+				cookies, bearer, csrf, storage = await self._drv.extract_cookies_and_tokens(target_host)  # type: ignore[attr-defined]
 				await self._drv.close()  # type: ignore[attr-defined]
 				return cookies, bearer, csrf, storage
 			await self._drv.close()  # type: ignore[attr-defined]

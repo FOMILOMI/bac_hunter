@@ -109,7 +109,7 @@ class SessionManager:
     def _session_path(self, domain: str) -> Optional[str]:
         if not self._sessions_dir:
             return None
-        safe = domain.replace(":", "_")
+        safe = (domain or "").lower().replace(":", "_")
         return f"{self._sessions_dir}/{safe}.json"
 
     def add_identity(self, ident: Identity):
@@ -202,16 +202,18 @@ class SessionManager:
                     pass
                 if dom:
                     try:
-                        cookies = data.get("cookies") or []
+                        cookies = self._filter_cookies_for_domain(dom, data.get("cookies") or [])
                         bearer = data.get("bearer") or data.get("token")
                         csrf = data.get("csrf")
                         storage = data.get("storage")
                         self.save_domain_session(dom, cookies, bearer, csrf, storage)
-                        try:
-                            print(f"✅ Session loaded from global store for {dom}")
-                        except Exception:
-                            pass
-                        return True
+                        # Only report success if there is actual domain-relevant auth material
+                        if (bearer and isinstance(bearer, str)) or any(self._cookie_is_valid(c) for c in cookies):
+                            try:
+                                print(f"✅ Session loaded from global store for {dom}")
+                            except Exception:
+                                pass
+                            return True
                     except Exception:
                         pass
         except Exception:
@@ -228,13 +230,15 @@ class SessionManager:
         # Try to load from sessions directory first
         try:
             if self._sessions_dir:
-                session_file = f"{self._sessions_dir}/{domain}.json"
+                session_file = self._session_path(domain) or f"{self._sessions_dir}/{domain}.json"
                 if os.path.exists(session_file):
                     with open(session_file, "r", encoding="utf-8") as f:
                         data = json.load(f) or {}
                         # Ensure we have the expected structure
                         if not isinstance(data.get("cookies"), list):
                             data["cookies"] = []
+                        # Scope cookies strictly to this domain
+                        data["cookies"] = self._filter_cookies_for_domain(domain, data.get("cookies") or [])
                         return data
         except Exception:
             pass
@@ -250,7 +254,7 @@ class SessionManager:
             if data:
                 # Return a copy to avoid modifying the global store
                 return {
-                    "cookies": data.get("cookies") or [],
+                    "cookies": self._filter_cookies_for_domain(domain, data.get("cookies") or []),
                     "bearer": data.get("bearer") or data.get("token"),
                     "csrf": data.get("csrf"),
                     "storage": data.get("storage")
@@ -266,8 +270,9 @@ class SessionManager:
             return
         
         # Update in-memory cache
+        filtered_cookies = self._filter_cookies_for_domain(domain, cookies or [])
         self._domain_sessions[domain] = {
-            "cookies": cookies or [],
+            "cookies": filtered_cookies,
             "bearer": bearer,
             "csrf": csrf,
             "storage": storage
@@ -276,7 +281,7 @@ class SessionManager:
         # Save to sessions directory
         try:
             if self._sessions_dir:
-                session_file = f"{self._sessions_dir}/{domain}.json"
+                session_file = self._session_path(domain) or f"{self._sessions_dir}/{domain}.json"
                 os.makedirs(os.path.dirname(session_file), exist_ok=True)
                 with open(session_file, "w", encoding="utf-8") as f:
                     json.dump(self._domain_sessions[domain], f, indent=2)
@@ -311,6 +316,7 @@ class SessionManager:
         # Filter out expired cookies to avoid sending stale values
         cookies_all = sess.get("cookies") or []
         cookies_valid = [c for c in cookies_all if self._cookie_is_valid(c)]
+        cookies_valid = self._filter_cookies_for_domain(domain, cookies_valid)
         cookie_header = self._cookie_header_from_cookies(cookies_valid)
         if cookie_header:
             h["Cookie"] = cookie_header
@@ -440,10 +446,11 @@ class SessionManager:
                             for c in cookies:
                                 if c.get("name") == name:
                                     c["value"] = val
+                                    c.setdefault("domain", domain)
                                     found = True
                                     break
                             if not found:
-                                cookies.append({"name": name, "value": val})
+                                cookies.append({"name": name, "value": val, "domain": domain})
                             sess["cookies"] = cookies
         except Exception:
             pass
@@ -519,7 +526,7 @@ class SessionManager:
                     pass
                 if dom:
                     try:
-                        cookies = data.get("cookies") or []
+                        cookies = self._filter_cookies_for_domain(dom, data.get("cookies") or [])
                         bearer = data.get("bearer") or data.get("token")
                         csrf = data.get("csrf")
                         storage = data.get("storage")
@@ -868,4 +875,40 @@ class SessionManager:
             return urlparse(url).netloc.split("@").pop().split(":")[0]
         except Exception:
             return None
+
+    def _normalize_domain(self, domain: Optional[str]) -> str:
+        try:
+            return (domain or "").lower().lstrip(".")
+        except Exception:
+            return domain or ""
+
+    def _domain_match(self, cookie_domain: Optional[str], target_domain: Optional[str]) -> bool:
+        cd = self._normalize_domain(cookie_domain)
+        td = self._normalize_domain(target_domain)
+        if not cd or not td:
+            return False
+        if cd == td:
+            return True
+        # Allow subdomain relationship in either direction
+        return td.endswith("." + cd) or cd.endswith("." + td)
+
+    def _filter_cookies_for_domain(self, domain: str, cookies: list) -> list:
+        try:
+            td = self._normalize_domain(domain)
+            out = []
+            for c in cookies or []:
+                try:
+                    cdom = self._normalize_domain(c.get("domain"))
+                    if not cdom:
+                        # If no domain on cookie, assume it belongs to target
+                        c["domain"] = td
+                        out.append(c)
+                        continue
+                    if self._domain_match(cdom, td):
+                        out.append(c)
+                except Exception:
+                    continue
+            return out
+        except Exception:
+            return cookies or []
     
