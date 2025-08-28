@@ -395,6 +395,13 @@ class AdvancedEvasionEngine:
 class BusinessContextAI:
 	"""Business-aware security testing with domain knowledge"""
 
+	def __init__(self):
+		# Initialize optional anomaly detector for methods that reference it
+		try:
+			self.anomaly_detector = AnomalyDetector()
+		except Exception:
+			self.anomaly_detector = None
+
 	async def industry_specific_testing(self, target_domain: str, industry_type: str):
 		cases = {
 			"healthcare": ["/patient", "/records", "/hl7"],
@@ -428,7 +435,7 @@ class BusinessContextAI:
 	async def detect_response_anomalies(self, responses: List[Dict[str, Any]], 
 	                                   baseline_responses: List[Dict[str, Any]] = None):
 		"""Detect anomalies in HTTP responses using AI"""
-		if not self.anomaly_detector:
+		if not getattr(self, "anomaly_detector", None):
 			log.warning("Anomaly detector not available")
 			return []
 		
