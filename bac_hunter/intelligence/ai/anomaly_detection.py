@@ -4,7 +4,11 @@ Detects unusual patterns in HTTP responses that might indicate broken access con
 """
 
 from __future__ import annotations
-import numpy as np
+try:
+    import numpy as np  # type: ignore
+except Exception:  # numpy is optional; provide graceful fallbacks
+    np = None  # type: ignore
+import math
 import json
 import logging
 from typing import Dict, List, Any, Optional, Tuple, Set
@@ -186,7 +190,11 @@ class ResponseAnalyzer:
         for count in char_counts.values():
             probability = count / text_length
             if probability > 0:
-                entropy -= probability * np.log2(probability)
+                # Use numpy if available for consistency; fallback to math
+                if np is not None:
+                    entropy -= probability * float(np.log2(probability))  # type: ignore
+                else:
+                    entropy -= probability * math.log2(probability)
         
         return entropy
     
@@ -298,6 +306,9 @@ class AnomalyDetector:
         if not baseline_responses or not self.isolation_forest:
             logger.warning("Cannot establish baseline: insufficient data or missing sklearn")
             return
+        if np is None:
+            logger.warning("Cannot establish baseline: numpy not available")
+            return
         
         logger.info(f"Establishing baseline from {len(baseline_responses)} responses")
         
@@ -339,6 +350,9 @@ class AnomalyDetector:
         if not self.baseline_established or not self.isolation_forest:
             logger.warning("Baseline not established or sklearn not available")
             return []
+        if np is None:
+            logger.warning("Numpy not available; anomaly detection disabled")
+            return []
         
         anomalies = []
         
@@ -352,6 +366,8 @@ class AnomalyDetector:
     def detect_single_anomaly(self, response: Dict[str, Any]) -> Optional[AnomalyResult]:
         """Detect anomaly in a single response"""
         if not self.baseline_established or not self.isolation_forest:
+            return None
+        if np is None:
             return None
         
         # Extract features

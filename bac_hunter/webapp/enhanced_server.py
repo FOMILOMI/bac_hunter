@@ -74,7 +74,7 @@ class ConnectionManager:
     async def send_personal_message(self, message: str, websocket: WebSocket):
         try:
             await websocket.send_text(message)
-        except:
+        except Exception:
             self.disconnect(websocket)
     
     async def broadcast(self, message: str):
@@ -82,7 +82,7 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
-            except:
+            except Exception:
                 disconnected.append(connection)
         
         # Remove disconnected clients
@@ -203,7 +203,7 @@ async def get_enhanced_stats():
             from urllib.parse import urlparse
             domain = urlparse(url).netloc
             target_distribution[domain] = target_distribution.get(domain, 0) + 1
-        except:
+        except Exception:
             pass
     
     return {

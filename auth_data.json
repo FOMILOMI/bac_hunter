@@ -1,7 +1,10 @@
 {
   "cookies": [],
-  "bearer": null,
-  "csrf": null,
-  "headers": {},
-  "storage": null
+  "bearer": "token",
+  "csrf": "csrf",
+  "headers": {
+    "Authorization": "Bearer token",
+    "X-CSRF-Token": "csrf"
+  },
+  "storage": {}
 }
