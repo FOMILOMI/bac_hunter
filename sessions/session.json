@@ -1,8 +1,15 @@
 {
+  "example4.com": {
+    "cookies": [],
+    "bearer": "token",
+    "csrf": "csrf",
+    "storage": {}
+  },
   "example.com": {
     "cookies": [],
-    "bearer": null,
-    "csrf": null
+    "bearer": "token",
+    "csrf": "csrf",
+    "storage": {}
   },
   "httpbin.org": {
     "cookies": [
@@ -15,5 +22,29 @@
     "bearer": null,
     "csrf": null,
     "storage": null
+  },
+  "example2.com": {
+    "cookies": [],
+    "bearer": "token",
+    "csrf": "csrf",
+    "storage": {}
+  },
+  "example3.com": {
+    "cookies": [],
+    "bearer": "token",
+    "csrf": "csrf",
+    "storage": {}
+  },
+  "example0.com": {
+    "cookies": [],
+    "bearer": "token",
+    "csrf": "csrf",
+    "storage": {}
+  },
+  "example1.com": {
+    "cookies": [],
+    "bearer": "token",
+    "csrf": "csrf",
+    "storage": {}
   }
 }

@@ -1,4 +1,4 @@
-Professional-grade, AI-enhanced automation framework for discovering Broken Access Control vulnerabilities. Built with modular architecture, smart rate limiting, unified orchestration, comprehensive reporting, and advanced machine learning capabilities.
+BAC Hunter is a professional-grade, AI‑enhanced framework for discovering Broken Access Control vulnerabilities. It features a modular architecture, smart rate limiting, unified orchestration, comprehensive reporting, and optional AI assistance.
 
 ### 🚀 What's New in v2.0
 - **🧙 Interactive Setup Wizard**: Guided configuration for beginners with pre-configured profiles
@@ -37,6 +37,25 @@ Professional-grade, AI-enhanced automation framework for discovering Broken Acce
 - **Modern Deployment**: Docker support for easy, isolated runs
 - **Production Ready**: Comprehensive error handling, performance optimization, and security enhancements
 
+## Overview
+
+BAC Hunter helps security engineers and developers discover access control issues across web apps and APIs. It provides safe defaults, graceful error handling, and optional integrations with external tools. The architecture is organized into clear modules:
+
+- core: configuration, HTTP client, session manager, rate limiting, storage
+- scanners: recon and testing plugins (GraphQL, robots, sitemap, JS parsing, etc.)
+- utils: shared helpers
+- reporting: exporters and report builders
+- ai_assistants: optional AI analysis and prioritization
+
+## Features
+
+- Smart HTTP stack with adaptive rate limiting and WAF awareness
+- Recon scanners for robots/sitemap/JS endpoints/OpenAPI/GraphQL
+- Session management with semi‑automatic login hooks
+- JSON/Markdown/HTML reporting with summaries and highlights
+- Optional AI post‑analysis for prioritization and insights
+- Clean CLI and web dashboard (optional extras)
+
 ## 🚀 Quick Start
 
 ### Installation
@@ -51,8 +70,8 @@ source bac_hunter_env/bin/activate  # On Windows: bac_hunter_env\Scripts\activat
 # Install dependencies
 pip install -r requirements.txt
 
-# Optional (for development and tests):
-pip install pytest pytest-asyncio pytest-mock
+# Optional (for development and tests)
+pip install -r requirements-test.txt
 ```
 
 #### Alternative: System-wide Installation
@@ -79,12 +98,12 @@ python3 -m venv venv && source venv/bin/activate && pip install -r requirements.
 - Key dependencies: `numpy`, `scikit-learn`, `httpx`, `typer`, `rich`
 - For AI features: `tensorflow-cpu`, `nltk`, `pandas`
 
-### 🧪 Testing the Fixes
+### 🧪 Testing
 
 After installation, run the comprehensive test suite to validate all fixes:
 
 ```bash
-# Run all tests to validate fixes
+# Run all tests
 python run_tests.py
 
 # Or run individual test suites
@@ -139,7 +158,7 @@ echo "max_idor_variants: 10" >> .bac-hunter.yml
 echo "max_endpoint_candidates: 25" >> .bac-hunter.yml
 ```
 
-### 📊 Performance Improvements
+### 📊 Performance
 
 - **40-60% reduction** in redundant HTTP requests
 - **70% reduction** in rate limit violations
@@ -148,7 +167,7 @@ echo "max_endpoint_candidates: 25" >> .bac-hunter.yml
 - **Adaptive rate limiting** with WAF detection
 - **Circuit breaker patterns** for graceful degradation
 
-## 🔍 What's Fixed
+## Architecture Notes
 
 ### Critical Issues Resolved
 
@@ -167,7 +186,14 @@ echo "max_endpoint_candidates: 25" >> .bac-hunter.yml
 - **Session Recovery**: Graceful handling of authentication failures
 - **Performance Monitoring**: Real-time metrics and optimization suggestions
 
-## 📚 Documentation
+## Documentation
+
+See docs/ for structured documentation:
+
+- docs/overview.md: architecture and modules
+- docs/usage.md: CLI usage and examples
+- docs/development.md: contribution, style, testing
+- docs/extending.md: writing new scanners/plugins
 
 - **[Comprehensive Fixes Report](COMPREHENSIVE_FIXES_REPORT.md)**: Detailed technical documentation
 - **[Enhanced Features Guide](ENHANCED_FEATURES.md)**: New capabilities and improvements
@@ -200,7 +226,7 @@ The tool is now production-ready with:
 - ✅ **Monitoring**: Real-time metrics and performance tracking
 - ✅ **Testing**: Comprehensive test suite and validation
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! Please see our contributing guidelines and ensure all tests pass:
 
@@ -213,7 +239,7 @@ python -m flake8 bac_hunter/
 python -m black --check bac_hunter/
 ```
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 

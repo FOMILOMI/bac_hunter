@@ -95,6 +95,7 @@ class UserGuidanceSystem:
             ErrorCategory.NETWORK: {
                 "description": "Network connectivity issues",
                 "quick_fixes": [
+                    "Increase timeout value",
                     "Check internet connection",
                     "Verify target URL is accessible",
                     "Try with different timeout: --timeout 30",
@@ -175,6 +176,8 @@ class UserGuidanceSystem:
         
     def categorize_error(self, error_message: str, status_code: Optional[int] = None) -> ErrorCategory:
         """Categorize an error based on message and status code."""
+        if not isinstance(error_message, str):
+            return ErrorCategory.UNKNOWN
         error_lower = error_message.lower()
         
         # Check status code first
@@ -189,7 +192,20 @@ class UserGuidanceSystem:
                 return ErrorCategory.RATE_LIMITED
                 
         # Check message patterns
-        for category, patterns in self.error_patterns.items():
+        # Prioritize categories deterministically: AUTHENTICATION before NETWORK, then others
+        ordered = [
+            ErrorCategory.AUTHENTICATION,
+            ErrorCategory.NETWORK,
+            ErrorCategory.WAF_DETECTED,
+            ErrorCategory.RATE_LIMITED,
+            ErrorCategory.CONFIGURATION,
+            ErrorCategory.DEPENDENCY,
+            ErrorCategory.PERMISSION,
+            ErrorCategory.INVALID_INPUT,
+            ErrorCategory.TARGET_UNREACHABLE,
+        ]
+        for category in ordered:
+            patterns = self.error_patterns.get(category, [])
             if any(pattern in error_lower for pattern in patterns):
                 return category
                 
@@ -207,7 +223,7 @@ class UserGuidanceSystem:
             "context": context,
             "severity": self._assess_severity(category, error_message),
             "user_friendly_message": self._generate_friendly_message(category, error_message),
-            "solutions": self.solution_database.get(category, {}),
+            "solutions": self.solution_database.get(category, {"quick_fixes": []}),
             "next_steps": self._generate_next_steps(category, context),
             "related_docs": self._get_related_documentation(category),
             "troubleshooting_commands": self._get_troubleshooting_commands(category)

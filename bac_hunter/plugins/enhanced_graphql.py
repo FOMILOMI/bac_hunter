@@ -31,7 +31,14 @@ class EnhancedGraphQLTester(Plugin):
     category = "testing"
     
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+        # Allow no-arg construction for tests by skipping base init when missing deps
+        if args or kwargs:
+            super().__init__(*args, **kwargs)
+        else:
+            # Minimal placeholders; tests will set http and db mocks
+            self.settings = None
+            self.http = None
+            self.db = None
         self.schema_cache = {}
         self.discovered_types = {}
         self.sensitive_fields = set()

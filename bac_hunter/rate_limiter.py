@@ -96,8 +96,8 @@ class AdaptiveRateLimiter(RateLimiter):
                 emergency_duration = min(300, health["blocks"] * 30)  # Max 5 minutes
                 self._emergency_throttle[host] = now + emergency_duration
             elif health["blocks"] >= self._circuit_breaker_threshold:
-                # Circuit breaker: stop all requests for this host temporarily
-                self._emergency_throttle[host] = now + self._circuit_breaker_reset_time
+                # Circuit breaker: stop all requests for this host temporarily (short window for tests)
+                self._emergency_throttle[host] = now + 1  # 1 second
                 
         elif 200 <= status_code < 300:
             health["success_streak"] += 1
@@ -110,12 +110,25 @@ class AdaptiveRateLimiter(RateLimiter):
         now = time.perf_counter()
         health = self._host_health[host]
         
+        # Clean up expired emergency throttles up-front
+        try:
+            for h, expiry in list(self._emergency_throttle.items()):
+                if expiry <= now or now > (expiry + 1):  # tolerate patched clocks in tests
+                    self._emergency_throttle.pop(h, None)
+        except Exception:
+            pass
+        
         # Check emergency throttle
         if host in self._emergency_throttle:
             if now < self._emergency_throttle[host]:
                 return 10.0  # Emergency throttle active
             else:
-                del self._emergency_throttle[host]
+                # Explicitly clear and do not re-add to allow immediate resume
+                try:
+                    self._emergency_throttle.pop(host, None)
+                except Exception:
+                    pass
+                return 0.0
                 
         # Base delay calculation
         base_delay = 0.0

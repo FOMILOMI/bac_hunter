@@ -17,11 +17,22 @@ class Plugin(abc.ABC):
 	category: str = "misc"
 
 	def __init__(self, settings: Settings, http: HttpClient, db: Storage):
+		"""Base plugin initializer.
+
+		Parameters:
+		- settings: Global `Settings` object
+		- http: Shared `HttpClient`
+		- db: Persistent `Storage`
+		"""
 		self.settings = settings
 		self.http = http
 		self.db = db
 
 	@abc.abstractmethod
 	async def run(self, base_url: str, target_id: int) -> List[str]:
-		"""Run plugin work; returns list of discovered URLs/endpoints."""
+		"""Run the plugin and return a list of discovered URLs/endpoints.
+
+		Implementations should handle their own error cases and return
+		an empty list on failure in order to keep the scan resilient.
+		"""
 		raise NotImplementedError

@@ -39,6 +39,11 @@ class StatsCollector:
         self.status_codes: Dict[int, int] = defaultdict(int)
         self.hosts_tested: Dict[str, int] = defaultdict(int)
         self.lock = threading.Lock()
+    
+    @property
+    def total_requests(self) -> int:
+        """Compatibility shim: expose total requests count for tests."""
+        return int(getattr(self.scan_stats, "total_requests", 0))
         
     def record_request(self, url: str, method: str, status_code: int, 
                       response_time_ms: float, response_size: int, 

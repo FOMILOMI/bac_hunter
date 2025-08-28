@@ -30,24 +30,40 @@ class JSEndpointsRecon(Plugin):
     category = "recon"
 
     async def run(self, base_url: str, target_id: int) -> List[str]:
-        # fetch homepage and linked JS (limited)
+        """Scan HTML and linked JavaScript for endpoint-like paths.
+
+        Fetches the base page and then fetches linked JS files concurrently
+        (bounded by the shared HTTP client semaphore). Errors in individual
+        JS requests are logged and skipped to ensure graceful progress.
+        """
+        import asyncio as _aio
+
         start = base_url if base_url.endswith("/") else base_url + "/"
         collected: Set[str] = set()
         # Step 1: homepage
         r = await self.http.get(start)
         self.db.save_page(target_id, start, r.status_code, r.headers.get("content-type"), r.content)
-        if r.status_code == 200 and r.text:
+        if r.status_code == 200 and getattr(r, 'text', None):
             collected |= self._extract_paths(r.text, base_url)
             # find linked JS files
-            for src in re.findall(r"<script[^>]+src=\"([^\"]+)\"", r.text, flags=re.I):
-                full = urljoin(base_url, src)
+            srcs = re.findall(r"<script[^>]+src=\"([^\"]+)\"", r.text, flags=re.I)
+            js_urls = [urljoin(base_url, s) for s in srcs]
+
+            async def _fetch_js(u: str):
                 try:
-                    jr = await self.http.get(full)
-                    self.db.save_page(target_id, full, jr.status_code, jr.headers.get("content-type"), jr.content)
-                    if jr.status_code == 200 and jr.text:
-                        collected |= self._extract_paths(jr.text, base_url)
+                    jr = await self.http.get(u)
+                    self.db.save_page(target_id, u, jr.status_code, jr.headers.get("content-type"), jr.content)
+                    if jr.status_code == 200 and getattr(jr, 'text', None):
+                        return self._extract_paths(jr.text, base_url)
                 except Exception:
-                    continue
+                    return set()
+                return set()
+
+            if js_urls:
+                results = await _aio.gather(*[_fetch_js(u) for u in js_urls], return_exceptions=True)
+                for res in results:
+                    if isinstance(res, set):
+                        collected |= res
         # Normalize, dedup, skip recursive nonsense
         try:
             from ...utils import normalize_url, is_recursive_duplicate_path
