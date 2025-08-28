@@ -360,6 +360,13 @@ def smart_scan(
     setup_logging(verbose)
     db = Storage(settings.db_path)
 
+    # Enable smart dedup/backoff to avoid redundant homepage fetches and smooth rate limiting
+    try:
+        settings.smart_dedup_enabled = True
+        settings.smart_backoff_enabled = True
+    except Exception:
+        pass
+
     profile = get_mode_profile(mode)
     settings.max_rps = profile.global_rps
     settings.per_host_rps = profile.per_host_rps

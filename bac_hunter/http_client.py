@@ -452,16 +452,27 @@ class HttpClient:
                     except Exception:
                         pass
                     # Smart auth error handling: distinguish between actual auth failure and WAF/permission issues
+                    # IMPORTANT: Avoid recursive auth probing loops. When context indicates an auth probe
+                    # (e.g., probe_auth_valid) or identity is 'auth-probe', skip all auth-handling logic.
+                    is_auth_probe_context = False
+                    try:
+                        is_auth_probe_context = bool((context or "").startswith("auth:")) or (h.get("X-BH-Identity") == "auth-probe")
+                    except Exception:
+                        is_auth_probe_context = False
+
                     try:
                         requires_auth = False
-                        if self._session_mgr and hasattr(self._session_mgr, "check_auth_required"):
-                            requires_auth = bool(self._session_mgr.check_auth_required(r))
+                        if not is_auth_probe_context:
+                            if self._session_mgr and hasattr(self._session_mgr, "check_auth_required"):
+                                requires_auth = bool(self._session_mgr.check_auth_required(r))
+                            else:
+                                requires_auth = r.status_code in (401, 403)
                         else:
-                            requires_auth = r.status_code in (401, 403)
+                            requires_auth = False
                     except Exception:
-                        requires_auth = r.status_code in (401, 403)
+                        requires_auth = (False if is_auth_probe_context else (r.status_code in (401, 403)))
                     
-                    if requires_auth and attempt == 0:
+                    if (not is_auth_probe_context) and requires_auth and attempt == 0:
                         # Before attempting login, validate if stored auth data is actually invalid
                         should_attempt_refresh = False
                         try:
