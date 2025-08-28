@@ -104,7 +104,7 @@ _db = Storage(_settings.db_path)
 _connection_manager = ConnectionManager()
 
 # Setup templates and static files
-templates_dir = Path(__file__).parent / "templates"
+templates_dir = Path(__file__).parent.parent.parent / "templates"
 static_dir = Path(__file__).parent / "static"
 
 if templates_dir.exists():
