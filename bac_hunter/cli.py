@@ -6,6 +6,10 @@ import shutil
 import socket
 from typing import List, Optional
 import typer
+from rich.console import Console
+
+console = Console()
+
 try:
     from . import __version__ as _BH_VERSION
 except Exception:

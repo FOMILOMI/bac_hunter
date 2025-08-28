@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import hashlib
 import time
+from collections import defaultdict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse, StreamingResponse
@@ -452,14 +453,34 @@ app.add_middleware(
 
 # Global instances
 manager = ConnectionManager()
-storage = Storage()
-project_manager = ProjectManager(storage)
+storage = Storage("bac_hunter.db")
+
+# Simple project storage for demo
+class SimpleProjectStorage:
+    def __init__(self):
+        self.projects = {}
+    
+    def get_projects(self):
+        return list(self.projects.values())
+    
+    def save_project(self, project_data):
+        self.projects[project_data['id']] = project_data
+    
+    def delete_project(self, project_id):
+        if project_id in self.projects:
+            del self.projects[project_id]
+
+project_storage = SimpleProjectStorage()
+project_manager = ProjectManager(project_storage)
 visualization_engine = VisualizationEngine()
 ai_engine = AdvancedAIEngine()
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+templates_dir = Path(__file__).parent.parent.parent / "templates"
+templates = Jinja2Templates(directory=str(templates_dir))
 
 # API Routes
 @app.get("/")
