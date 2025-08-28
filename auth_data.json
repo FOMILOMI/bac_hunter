@@ -1,10 +1,17 @@
 {
-  "cookies": [],
-  "bearer": "token",
-  "csrf": "csrf",
+  "cookies": [
+    {
+      "name": "session",
+      "value": "test123",
+      "domain": "test.example.com"
+    }
+  ],
+  "bearer": "bearer_token_123",
+  "csrf": "csrf_token_456",
   "headers": {
-    "Authorization": "Bearer token",
-    "X-CSRF-Token": "csrf"
+    "Cookie": "session=test123",
+    "Authorization": "Bearer bearer_token_123",
+    "X-CSRF-Token": "csrf_token_456"
   },
-  "storage": {}
+  "storage": null
 }
