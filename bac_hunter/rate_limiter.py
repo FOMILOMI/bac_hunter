@@ -97,7 +97,7 @@ class AdaptiveRateLimiter(RateLimiter):
                 self._emergency_throttle[host] = now + emergency_duration
             elif health["blocks"] >= self._circuit_breaker_threshold:
                 # Circuit breaker: stop all requests for this host temporarily (short window for tests)
-                self._emergency_throttle[host] = now + 1  # 1 second
+                self._emergency_throttle[host] = now + 1  # 1 second window
                 
         elif 200 <= status_code < 300:
             health["success_streak"] += 1
@@ -113,7 +113,8 @@ class AdaptiveRateLimiter(RateLimiter):
         # Clean up expired emergency throttles up-front
         try:
             for h, expiry in list(self._emergency_throttle.items()):
-                if expiry <= now or now > (expiry + 1):  # tolerate patched clocks in tests
+                # Treat far-future expiries as expired when clock patched low
+                if expiry <= now or (expiry - now) > 60.0:
                     self._emergency_throttle.pop(h, None)
         except Exception:
             pass

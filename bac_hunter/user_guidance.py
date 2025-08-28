@@ -37,11 +37,12 @@ class UserGuidanceSystem:
         return {
             ErrorCategory.AUTHENTICATION: [
                 "401", "unauthorized", "authentication failed", "login failed",
-                "invalid credentials", "session expired", "token expired"
+                "invalid credentials", "session expired", "token expired", "authentication"
             ],
             ErrorCategory.NETWORK: [
                 "connection refused", "timeout", "network unreachable", 
-                "dns resolution failed", "connection reset", "ssl error"
+                "dns resolution failed", "connection reset", "ssl error",
+                "timeout occurred"
             ],
             ErrorCategory.CONFIGURATION: [
                 "config", "configuration", "missing parameter", "invalid parameter",
@@ -55,7 +56,7 @@ class UserGuidanceSystem:
             ],
             ErrorCategory.WAF_DETECTED: [
                 "blocked by security policy", "waf", "firewall", "cloudflare",
-                "suspicious activity", "rate limit", "429"
+                "suspicious activity"
             ],
             ErrorCategory.RATE_LIMITED: [
                 "429", "too many requests", "rate limit", "throttled"
@@ -64,7 +65,7 @@ class UserGuidanceSystem:
                 "invalid url", "malformed", "syntax error", "invalid format"
             ],
             ErrorCategory.DEPENDENCY: [
-                "module not found", "import error", "missing dependency",
+                "modulenotfounderror", "module not found", "import error", "missing dependency",
                 "playwright not installed", "browser not found"
             ]
         }
@@ -185,6 +186,9 @@ class UserGuidanceSystem:
             if status_code == 401:
                 return ErrorCategory.AUTHENTICATION
             elif status_code == 403:
+                # If message indicates WAF/security policy, prefer WAF_DETECTED
+                if error_lower and any(p in error_lower for p in self.error_patterns.get(ErrorCategory.WAF_DETECTED, [])):
+                    return ErrorCategory.WAF_DETECTED
                 return ErrorCategory.PERMISSION
             elif status_code == 404:
                 return ErrorCategory.TARGET_UNREACHABLE
@@ -195,19 +199,20 @@ class UserGuidanceSystem:
         # Prioritize categories deterministically: AUTHENTICATION before NETWORK, then others
         ordered = [
             ErrorCategory.AUTHENTICATION,
-            ErrorCategory.NETWORK,
             ErrorCategory.WAF_DETECTED,
             ErrorCategory.RATE_LIMITED,
-            ErrorCategory.CONFIGURATION,
+            ErrorCategory.NETWORK,
             ErrorCategory.DEPENDENCY,
+            ErrorCategory.CONFIGURATION,
             ErrorCategory.PERMISSION,
             ErrorCategory.INVALID_INPUT,
             ErrorCategory.TARGET_UNREACHABLE,
         ]
         for category in ordered:
             patterns = self.error_patterns.get(category, [])
-            if any(pattern in error_lower for pattern in patterns):
-                return category
+            for pattern in patterns:
+                if pattern in error_lower:
+                    return category
                 
         return ErrorCategory.UNKNOWN
         
@@ -216,6 +221,20 @@ class UserGuidanceSystem:
         """Get comprehensive guidance for an error."""
         category = self.categorize_error(error_message, status_code)
         
+        # Ensure solutions contain at least base quick fixes for known categories
+        base_defaults = {
+            ErrorCategory.RATE_LIMITED: {
+                "quick_fixes": [
+                    "Reduce scan speed with --max-rps",
+                    "Enable stealth mode",
+                    "Increase jitter/delays"
+                ]
+            }
+        }
+        solutions = self.solution_database.get(category, {"quick_fixes": []})
+        if category in base_defaults and not solutions.get("quick_fixes"):
+            solutions = base_defaults[category]
+
         guidance = {
             "error_category": category.value,
             "error_message": error_message,
@@ -223,7 +242,7 @@ class UserGuidanceSystem:
             "context": context,
             "severity": self._assess_severity(category, error_message),
             "user_friendly_message": self._generate_friendly_message(category, error_message),
-            "solutions": self.solution_database.get(category, {"quick_fixes": []}),
+            "solutions": solutions,
             "next_steps": self._generate_next_steps(category, context),
             "related_docs": self._get_related_documentation(category),
             "troubleshooting_commands": self._get_troubleshooting_commands(category)
