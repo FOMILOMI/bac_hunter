@@ -15,7 +15,7 @@ try:
 	from ..access import IDORProbe, DifferentialTester, ForceBrowser
 	from ..audit import HeaderInspector, ParamToggle
 	from ..exploitation.privilege_escalation import PrivilegeEscalationTester
-	from ..advanced.parameter_miner import ParameterMiner
+	from ..advanced import ParameterMiner
 	from ..integrations import SubfinderWrapper, PDHttpxWrapper
 	from ..notifications import AlertManager
 	from ..safety.scope_guard import ScopeGuard
@@ -30,7 +30,7 @@ except Exception:
 	from access import IDORProbe, DifferentialTester, ForceBrowser
 	from audit import HeaderInspector, ParamToggle
 	from exploitation.privilege_escalation import PrivilegeEscalationTester
-	from advanced.parameter_miner import ParameterMiner
+	from advanced import ParameterMiner
 	from integrations import SubfinderWrapper, PDHttpxWrapper
 	from notifications import AlertManager
 	from safety.scope_guard import ScopeGuard

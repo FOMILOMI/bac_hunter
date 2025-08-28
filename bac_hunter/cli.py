@@ -31,7 +31,7 @@ try:
     from .orchestrator import JobStore, Worker
     from .integrations import SubfinderWrapper, PDHttpxWrapper
     from .exploitation.privilege_escalation import PrivilegeEscalationTester
-    from .advanced.parameter_miner import ParameterMiner
+    from .advanced import ParameterMiner
     from .fallback import PathScanner, ParamScanner
     from .profiling import TargetProfiler
     # Dashboard import is optional to avoid FastAPI requirement during CLI import in tests

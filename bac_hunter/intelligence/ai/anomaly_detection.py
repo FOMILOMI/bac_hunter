@@ -657,3 +657,14 @@ def generate_anomaly_report(anomalies: List[AnomalyResult]) -> Dict[str, Any]:
     """Convenience function to generate anomaly report"""
     reporter = AnomalyReporter()
     return reporter.generate_report(anomalies)
+
+
+# Export main components
+__all__ = [
+    "AnomalyDetector",
+    "AnomalyReporter", 
+    "AnomalyResult",
+    "AnomalyFeatures",
+    "detect_anomalies_in_responses",
+    "generate_anomaly_report"
+]

@@ -50,6 +50,35 @@ from .semantic_analyzer import (
     LogicPattern as LogicPatternClass,
     SemanticAnalysis
 )
+from .continuous_learning import (
+    ContinuousLearningSystem,
+    ScanResult,
+    ScanResultType,
+    LearningMetrics,
+    TargetPrioritizer,
+    EndpointPredictor,
+    VulnerabilityPredictor,
+    StrategyOptimizer
+)
+from .adaptive_tuning import (
+    AdaptiveParameterTuner,
+    GlobalParameterManager,
+    TuningParameters,
+    ServerResponse,
+    ServerResponseType,
+    ParameterType
+)
+from .decision_engine import (
+    AIDecisionEngine,
+    DecisionType,
+    DecisionResult,
+    EndpointAnalysis,
+    EndpointCategory,
+    VulnerabilityType as DecisionVulnerabilityType,
+    PatternDetector,
+    AnomalyDetector as DecisionAnomalyDetector,
+    PriorityCalculator
+)
 
 # Module logger
 log = logging.getLogger("ai.engine")
@@ -338,8 +367,6 @@ __all__ = [
     "DecisionResult",
     "EndpointAnalysis",
     "EndpointCategory",
-    "VulnerabilityType as DecisionVulnerabilityType",
     "PatternDetector",
-    "AnomalyDetector as DecisionAnomalyDetector",
     "PriorityCalculator"
 ]
