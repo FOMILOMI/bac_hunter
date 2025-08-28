@@ -147,9 +147,12 @@ class Storage:
                 (score, target_id, type_, url),
             )
 
-    def iter_findings(self) -> Iterable[Tuple[int, str, str, str, float]]:
+    def iter_findings(self, limit: Optional[int] = None) -> Iterable[Tuple[int, str, str, str, float]]:
         with self.conn() as c:
-            for row in c.execute("SELECT target_id, type, url, evidence, score FROM findings ORDER BY score DESC"):
+            query = "SELECT target_id, type, url, evidence, score FROM findings ORDER BY score DESC"
+            if limit is not None:
+                query += f" LIMIT {limit}"
+            for row in c.execute(query):
                 yield row
 
     # New helper methods

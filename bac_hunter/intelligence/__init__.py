@@ -41,5 +41,11 @@ __all__ = [
 	"SmartSessionManager",
 	"IntelligentTargetProfiler",
 	"InteractiveGuidanceSystem",
+	"BAC_ML_Engine",
+	"NovelVulnDetector",
+	"AdvancedEvasionEngine",
+	"BusinessContextAI",
+	"QuantumReadySecurityAnalyzer",
+	"AdvancedIntelligenceReporting",
 ]
 

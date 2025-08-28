@@ -7,6 +7,7 @@ try:
 	from .auth_discovery import AuthDiscoveryRecon
 	from .oauth_oidc import OAuthOIDCRecon
 	from .spa_tester import SPATester
+	from .openapi import OpenAPIRecon
 except Exception:
 	from plugins.recon.robots import RobotsRecon
 	from plugins.recon.sitemap import SitemapRecon
@@ -16,5 +17,6 @@ except Exception:
 	from plugins.recon.auth_discovery import AuthDiscoveryRecon
 	from plugins.recon.oauth_oidc import OAuthOIDCRecon
 	from plugins.recon.spa_tester import SPATester
+	from plugins.recon.openapi import OpenAPIRecon
 
-__all__ = ["RobotsRecon", "SitemapRecon", "JSEndpointsRecon", "GraphQLRecon", "SmartEndpointDetector", "AuthDiscoveryRecon", "OAuthOIDCRecon", "SPATester"]
+__all__ = ["RobotsRecon", "SitemapRecon", "JSEndpointsRecon", "GraphQLRecon", "SmartEndpointDetector", "AuthDiscoveryRecon", "OAuthOIDCRecon", "SPATester", "OpenAPIRecon"]
