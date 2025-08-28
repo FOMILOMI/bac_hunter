@@ -2502,9 +2502,9 @@ def train_models(
         console.print(f"[red]❌ Model training failed: {e}[/red]")
         raise typer.Exit(1)
 
-# Update the main smart-auto command to include AI features
-@app.command()
-def smart_auto(
+# Update AI-powered smart auto as a separate command to avoid overriding the main pipeline
+@app.command(name="smart-auto-ai")
+def smart_auto_ai(
     target: str = typer.Argument(..., help="Target URL"),
     mode: str = typer.Option("standard", "--mode", "-m", help="Scan mode"),
     max_rps: float = typer.Option(2.0, "--max-rps", help="Maximum requests per second"),

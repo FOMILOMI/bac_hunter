@@ -4,6 +4,10 @@ Comprehensive AI-powered vulnerability detection and analysis
 """
 
 from __future__ import annotations
+import logging
+import json
+from pathlib import Path
+from typing import Any, Dict, List
 
 from .core import BAC_ML_Engine, NovelVulnDetector, AdvancedEvasionEngine, BusinessContextAI, QuantumReadySecurityAnalyzer, AdvancedIntelligenceReporting
 from .anomaly_detection import AnomalyDetector, AnomalyReporter, detect_anomalies_in_responses, generate_anomaly_report
@@ -46,6 +50,9 @@ from .semantic_analyzer import (
     LogicPattern as LogicPatternClass,
     SemanticAnalysis
 )
+
+# Module logger
+log = logging.getLogger("ai.engine")
 
 # Main AI Engine that integrates all components
 class AdvancedAIEngine:

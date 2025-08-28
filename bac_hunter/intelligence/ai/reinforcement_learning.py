@@ -227,7 +227,8 @@ class DQNAgent:
             
         # Main model
         self.model = models.Sequential([
-            layers.Dense(64, input_dim=self.state_size, activation='relu'),
+            keras.Input(shape=(self.state_size,)),
+            layers.Dense(64, activation='relu'),
             layers.Dropout(0.2),
             layers.Dense(64, activation='relu'),
             layers.Dropout(0.2),
@@ -242,7 +243,8 @@ class DQNAgent:
         
         # Target model (for stable training)
         self.target_model = models.Sequential([
-            layers.Dense(64, input_dim=self.state_size, activation='relu'),
+            keras.Input(shape=(self.state_size,)),
+            layers.Dense(64, activation='relu'),
             layers.Dropout(0.2),
             layers.Dense(64, activation='relu'),
             layers.Dropout(0.2),
