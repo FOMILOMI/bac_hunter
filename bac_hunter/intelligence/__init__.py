@@ -16,6 +16,16 @@ try:
 			QuantumReadySecurityAnalyzer,
 			AdvancedIntelligenceReporting,
 		)
+		from .ai import (
+			AdvancedAIEngine,
+			DeepLearningBACEngine,
+			RLBACOptimizer,
+			IntelligentPayloadGenerator,
+			SemanticAnalyzer,
+			PayloadType,
+			PayloadContext,
+			DataType
+		)
 	except Exception:
 		# Allow package import before files exist during partial installs
 		BAC_ML_Engine = object  # type: ignore
@@ -24,6 +34,14 @@ try:
 		BusinessContextAI = object  # type: ignore
 		QuantumReadySecurityAnalyzer = object  # type: ignore
 		AdvancedIntelligenceReporting = object  # type: ignore
+		AdvancedAIEngine = object  # type: ignore
+		DeepLearningBACEngine = object  # type: ignore
+		RLBACOptimizer = object  # type: ignore
+		IntelligentPayloadGenerator = object  # type: ignore
+		SemanticAnalyzer = object  # type: ignore
+		PayloadType = object  # type: ignore
+		PayloadContext = object  # type: ignore
+		DataType = object  # type: ignore
 
 except Exception:
 	from intelligence.auth_engine import AutonomousAuthEngine, CredentialInferenceEngine
@@ -47,5 +65,13 @@ __all__ = [
 	"BusinessContextAI",
 	"QuantumReadySecurityAnalyzer",
 	"AdvancedIntelligenceReporting",
+	"AdvancedAIEngine",
+	"DeepLearningBACEngine",
+	"RLBACOptimizer",
+	"IntelligentPayloadGenerator",
+	"SemanticAnalyzer",
+	"PayloadType",
+	"PayloadContext",
+	"DataType",
 ]
 
