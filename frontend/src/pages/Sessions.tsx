@@ -38,26 +38,27 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  Rating,
+  Checkbox,
   Slider,
+  FormGroup,
+  List,
+  ListItem,
+  ListItemButton,
+  ListItemAvatar,
+  Avatar,
 } from '@mui/material'
 import {
   Add as AddIcon,
   Search as SearchIcon,
   FilterList as FilterIcon,
   MoreVert as MoreIcon,
-  Psychology as AIIcon,
+  Storage as SessionIcon,
   TrendingUp as TrendIcon,
-  Lightbulb as InsightIcon,
+  Download as DownloadIcon,
   Security as SecurityIcon,
   BugReport as FindingIcon,
-  Assessment as ReportIcon,
   Refresh as RefreshIcon,
-  Download as ExportIcon,
   Share as ShareIcon,
-  ThumbUp as ThumbUpIcon,
-  ThumbDown as ThumbDownIcon,
-  Star as StarIcon,
   Visibility as ViewIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
@@ -68,19 +69,39 @@ import {
   Warning as WarningIcon,
   Error as ErrorIcon,
   Info as InfoIcon,
+  Schedule as ScheduleIcon,
+  Email as EmailIcon,
+  CloudDownload as CloudDownloadIcon,
+  PictureAsPdf as PDFIcon,
+  Code as CodeIcon,
+  Description as HTMLIcon,
+  TableChart as CSVIcon,
+  DataObject as JSONIcon,
+  Upload as UploadIcon,
+  PlayArrow as PlayIcon,
+  Stop as StopIcon,
+  Pause as PauseIcon,
+  Replay as ReplayIcon,
+  Timeline as TimelineIcon,
+  AccountTree as TreeIcon,
+  NetworkCheck as NetworkIcon,
+  Http as HttpIcon,
+  Lock as LockIcon,
+  Public as PublicIcon,
 } from '@mui/icons-material'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 
-import { aiInsightsAPI } from '../services/api'
-import { AIInsight, Project, Scan } from '../types'
-import AIInsightCard from '../components/ai/AIInsightCard'
-import AIInsightForm from '../components/ai/AIInsightForm'
-import AIInsightFilters from '../components/ai/AIInsightFilters'
-import AIInsightStats from '../components/ai/AIInsightStats'
-import AIInsightDetails from '../components/ai/AIInsightDetails'
-import AIInsightTimeline from '../components/ai/AIInsightTimeline'
-import AIInsightExport from '../components/ai/AIInsightExport'
+import { sessionsAPI } from '../services/api'
+import { Session, Project, Scan, Finding } from '../types'
+import SessionCard from '../components/sessions/SessionCard'
+import SessionForm from '../components/sessions/SessionForm'
+import SessionFilters from '../components/sessions/SessionFilters'
+import SessionStats from '../components/sessions/SessionStats'
+import SessionDetails from '../components/sessions/SessionDetails'
+import SessionTimeline from '../components/sessions/SessionTimeline'
+import SessionExport from '../components/sessions/SessionExport'
+import SessionVisualizer from '../components/sessions/SessionVisualizer'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -95,8 +116,8 @@ function TabPanel(props: TabPanelProps) {
     <div
       role="tabpanel"
       hidden={value !== index}
-      id={`ai-insights-tabpanel-${index}`}
-      aria-labelledby={`ai-insights-tab-${index}`}
+      id={`sessions-tabpanel-${index}`}
+      aria-labelledby={`sessions-tab-${index}`}
       {...other}
     >
       {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
@@ -104,109 +125,124 @@ function TabPanel(props: TabPanelProps) {
   )
 }
 
-const AIInsights: React.FC = () => {
+const Sessions: React.FC = () => {
   const theme = useTheme()
   const queryClient = useQueryClient()
   const [tabValue, setTabValue] = useState(0)
   const [searchTerm, setSearchTerm] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState<string[]>([])
-  const [confidenceFilter, setConfidenceFilter] = useState<number[]>([0, 100])
+  const [statusFilter, setStatusFilter] = useState<string[]>([])
+  const [typeFilter, setTypeFilter] = useState<string[]>([])
   const [projectFilter, setProjectFilter] = useState<string[]>([])
   const [scanFilter, setScanFilter] = useState<string[]>([])
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [showDetailsDialog, setShowDetailsDialog] = useState(false)
+  const [showVisualizerDialog, setShowVisualizerDialog] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
-  const [selectedInsight, setSelectedInsight] = useState<AIInsight | null>(null)
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'timeline'>('grid')
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null)
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'timeline' | 'tree'>('grid')
   const [page, setPage] = useState(0)
   const [rowsPerPage, setRowsPerPage] = useState(25)
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const [showConfidenceSlider, setShowConfidenceSlider] = useState(false)
 
-  // Fetch AI insights with auto-refresh
+  // Fetch sessions with auto-refresh
   const {
-    data: insightsData,
+    data: sessionsData,
     isLoading,
     error,
     refetch,
-  } = useQuery(['ai-insights'], aiInsightsAPI.getAll, {
+  } = useQuery(['sessions'], sessionsAPI.getAll, {
     refetchInterval: autoRefresh ? 15000 : false, // Refresh every 15 seconds if enabled
   })
 
-  const insights = insightsData?.insights || []
+  const sessions = sessionsData?.sessions || []
 
-  // Update insight feedback mutations
-  const updateFeedbackMutation = useMutation(aiInsightsAPI.updateFeedback, {
+  // Create session mutation
+  const createSessionMutation = useMutation(sessionsAPI.create, {
     onSuccess: () => {
-      queryClient.invalidateQueries(['ai-insights'])
-      toast.success('Feedback submitted successfully!')
+      queryClient.invalidateQueries(['sessions'])
+      toast.success('Session created successfully!')
     },
     onError: (error: any) => {
-      toast.error(`Failed to submit feedback: ${error.message}`)
+      toast.error(`Failed to create session: ${error.message}`)
     },
   })
 
-  // Delete insight mutation
-  const deleteInsightMutation = useMutation(aiInsightsAPI.delete, {
+  // Delete session mutation
+  const deleteSessionMutation = useMutation(sessionsAPI.delete, {
     onSuccess: () => {
-      queryClient.invalidateQueries(['ai-insights'])
-      toast.success('Insight deleted successfully!')
+      queryClient.invalidateQueries(['sessions'])
+      toast.success('Session deleted successfully!')
     },
     onError: (error: any) => {
-      toast.error(`Failed to delete insight: ${error.message}`)
+      toast.error(`Failed to delete session: ${error.message}`)
     },
   })
 
-  // Filter insights based on search and filters
-  const filteredInsights = insights.filter((insight) => {
-    const matchesSearch = insight.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         insight.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         insight.recommendation?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         insight.category?.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    const matchesCategory = categoryFilter.length === 0 || categoryFilter.includes(insight.category)
-    const matchesConfidence = insight.confidence >= confidenceFilter[0] && insight.confidence <= confidenceFilter[1]
-    const matchesProject = projectFilter.length === 0 || projectFilter.includes(insight.project_id)
-    const matchesScan = scanFilter.length === 0 || projectFilter.includes(insight.scan_id)
-    
-    return matchesSearch && matchesCategory && matchesConfidence && matchesProject && matchesScan
+  // Replay session mutation
+  const replaySessionMutation = useMutation(sessionsAPI.replay, {
+    onSuccess: () => {
+      queryClient.invalidateQueries(['sessions'])
+      toast.success('Session replay started successfully!')
+    },
+    onError: (error: any) => {
+      toast.error(`Failed to replay session: ${error.message}`)
+    },
   })
 
-  // Group insights by category
-  const insightsByCategory = {
-    security: filteredInsights.filter(i => i.category === 'security'),
-    performance: filteredInsights.filter(i => i.category === 'performance'),
-    compliance: filteredInsights.filter(i => i.category === 'compliance'),
-    best_practices: filteredInsights.filter(i => i.category === 'best_practices'),
-    optimization: filteredInsights.filter(i => i.category === 'optimization'),
+  // Filter sessions based on search and filters
+  const filteredSessions = sessions.filter((session) => {
+    const matchesSearch = session.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         session.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         session.type?.toLowerCase().includes(searchTerm.toLowerCase())
+    
+    const matchesStatus = statusFilter.length === 0 || statusFilter.includes(session.status)
+    const matchesType = typeFilter.length === 0 || typeFilter.includes(session.type)
+    const matchesProject = projectFilter.length === 0 || projectFilter.includes(session.project_id)
+    const matchesScan = scanFilter.length === 0 || projectFilter.includes(session.scan_id)
+    
+    return matchesSearch && matchesStatus && matchesType && matchesProject && matchesScan
+  })
+
+  // Group sessions by status
+  const sessionsByStatus = {
+    active: filteredSessions.filter(s => s.status === 'active'),
+    inactive: filteredSessions.filter(s => s.status === 'inactive'),
+    expired: filteredSessions.filter(s => s.status === 'expired'),
+    suspended: filteredSessions.filter(s => s.status === 'suspended'),
   }
 
-  // Group insights by confidence level
-  const insightsByConfidence = {
-    high: filteredInsights.filter(i => i.confidence >= 80),
-    medium: filteredInsights.filter(i => i.confidence >= 50 && i.confidence < 80),
-    low: filteredInsights.filter(i => i.confidence < 50),
+  // Group sessions by type
+  const sessionsByType = {
+    http: filteredSessions.filter(s => s.type === 'http'),
+    https: filteredSessions.filter(s => s.type === 'https'),
+    websocket: filteredSessions.filter(s => s.type === 'websocket'),
+    api: filteredSessions.filter(s => s.type === 'api'),
+    custom: filteredSessions.filter(s => s.type === 'custom'),
   }
 
-  const handleCreateInsight = (insightData: any) => {
-    // Implementation for creating new AI insights
-    toast.success('AI Insight created successfully!')
+  const handleCreateSession = (sessionData: any) => {
+    createSessionMutation.mutate(sessionData)
     setShowCreateDialog(false)
   }
 
-  const handleUpdateFeedback = (insightId: string, feedback: any) => {
-    updateFeedbackMutation.mutate({ insightId, feedback })
-  }
-
-  const handleDeleteInsight = (insightId: string) => {
-    if (window.confirm('Are you sure you want to delete this AI insight? This action cannot be undone.')) {
-      deleteInsightMutation.mutate(insightId)
+  const handleDeleteSession = (sessionId: string) => {
+    if (window.confirm('Are you sure you want to delete this session? This action cannot be undone.')) {
+      deleteSessionMutation.mutate(sessionId)
     }
   }
 
-  const handleViewDetails = (insight: AIInsight) => {
-    setSelectedInsight(insight)
+  const handleReplaySession = (sessionId: string) => {
+    replaySessionMutation.mutate(sessionId)
+  }
+
+  const handleViewDetails = (session: Session) => {
+    setSelectedSession(session)
     setShowDetailsDialog(true)
+  }
+
+  const handleVisualizeSession = (session: Session) => {
+    setSelectedSession(session)
+    setShowVisualizerDialog(true)
   }
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
@@ -220,15 +256,11 @@ const AIInsights: React.FC = () => {
     }
   }
 
-  const handleConfidenceChange = (event: Event, newValue: number | number[]) => {
-    setConfidenceFilter(newValue as number[])
-  }
-
   if (error) {
     return (
       <Box sx={{ p: 3 }}>
         <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to load AI insights: {(error as any).message}
+          Failed to load sessions: {(error as any).message}
         </Alert>
         <Button onClick={() => refetch()} startIcon={<RefreshIcon />}>
           Retry
@@ -243,10 +275,10 @@ const AIInsights: React.FC = () => {
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
-            AI Insights & Recommendations
+            Session Management
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            Intelligent analysis and actionable recommendations powered by AI
+            Manage, visualize, and manipulate HTTP sessions and requests
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -271,23 +303,23 @@ const AIInsights: React.FC = () => {
           </Button>
           <Button
             variant="outlined"
-            startIcon={<ExportIcon />}
+            startIcon={<UploadIcon />}
             onClick={() => setShowExportDialog(true)}
           >
-            Export
+            Import/Export
           </Button>
           <Button
             variant="contained"
             startIcon={<AddIcon />}
             onClick={() => setShowCreateDialog(true)}
           >
-            Generate Insight
+            New Session
           </Button>
         </Box>
       </Box>
 
-      {/* AI Insights Statistics */}
-      <AIInsightStats insights={insights} />
+      {/* Sessions Statistics */}
+      <SessionStats sessions={sessions} />
 
       {/* Search and Filters */}
       <Card sx={{ mb: 3 }}>
@@ -296,7 +328,7 @@ const AIInsights: React.FC = () => {
             <Grid item xs={12} md={6}>
               <TextField
                 fullWidth
-                placeholder="Search AI insights..."
+                placeholder="Search sessions..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 InputProps={{
@@ -309,96 +341,69 @@ const AIInsights: React.FC = () => {
               />
             </Grid>
             <Grid item xs={12} md={6}>
-              <AIInsightFilters
-                categoryFilter={categoryFilter}
-                setCategoryFilter={setCategoryFilter}
-                confidenceFilter={confidenceFilter}
-                setConfidenceFilter={setConfidenceFilter}
+              <SessionFilters
+                statusFilter={statusFilter}
+                setStatusFilter={setStatusFilter}
+                typeFilter={typeFilter}
+                setTypeFilter={setTypeFilter}
                 projectFilter={projectFilter}
                 setProjectFilter={setProjectFilter}
                 scanFilter={scanFilter}
                 setScanFilter={setScanFilter}
-                insights={insights}
-                showConfidenceSlider={showConfidenceSlider}
-                setShowConfidenceSlider={setShowConfidenceSlider}
-                onConfidenceChange={handleConfidenceChange}
+                sessions={sessions}
               />
             </Grid>
           </Grid>
-          
-          {/* Confidence Slider */}
-          {showConfidenceSlider && (
-            <Box sx={{ mt: 2, px: 2 }}>
-              <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                Confidence Range: {confidenceFilter[0]}% - {confidenceFilter[1]}%
-              </Typography>
-              <Slider
-                value={confidenceFilter}
-                onChange={handleConfidenceChange}
-                valueLabelDisplay="auto"
-                min={0}
-                max={100}
-                step={5}
-                marks={[
-                  { value: 0, label: '0%' },
-                  { value: 25, label: '25%' },
-                  { value: 50, label: '50%' },
-                  { value: 75, label: '75%' },
-                  { value: 100, label: '100%' },
-                ]}
-              />
-            </Box>
-          )}
         </CardContent>
       </Card>
 
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="ai insights tabs">
+        <Tabs value={tabValue} onChange={handleTabChange} aria-label="sessions tabs">
           <Tab 
-            label={`All Insights (${filteredInsights.length})`} 
-            icon={<AIIcon />}
+            label={`All Sessions (${filteredSessions.length})`} 
+            icon={<SessionIcon />}
             iconPosition="start"
           />
           <Tab 
             label={
-              <Badge badgeContent={insightsByCategory.security.length} color="error">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <SecurityIcon />
-                  Security
-                </Box>
-              </Badge>
-            }
-            iconPosition="start"
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={insightsByCategory.performance.length} color="warning">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <SpeedIcon />
-                  Performance
-                </Box>
-              </Badge>
-            }
-            iconPosition="start"
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={insightsByConfidence.high.length} color="success">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <StarIcon />
-                  High Confidence
-                </Box>
-              </Badge>
-            }
-            iconPosition="start"
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={insightsByCategory.compliance.length} color="info">
+              <Badge badgeContent={sessionsByStatus.active.length} color="success">
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <CheckCircle />
-                  Compliance
+                  Active
+                </Box>
+              </Badge>
+            }
+            iconPosition="start"
+          />
+          <Tab 
+            label={
+              <Badge badgeContent={sessionsByType.http.length} color="primary">
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <HttpIcon />
+                  HTTP
+                </Box>
+              </Badge>
+            }
+            iconPosition="start"
+          />
+          <Tab 
+            label={
+              <Badge badgeContent={sessionsByType.https.length} color="info">
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <LockIcon />
+                  HTTPS
+                </Box>
+              </Badge>
+            }
+            iconPosition="start"
+          />
+          <Tab 
+            label={
+              <Badge badgeContent={sessionsByType.api.length} color="warning">
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                  <CodeIcon />
+                  API
                 </Box>
               </Badge>
             }
@@ -409,12 +414,13 @@ const AIInsights: React.FC = () => {
 
       {/* Tab Panels */}
       <TabPanel value={tabValue} index={0}>
-        <AIInsightGrid
-          insights={filteredInsights}
+        <SessionGrid
+          sessions={filteredSessions}
           isLoading={isLoading}
-          onUpdateFeedback={handleUpdateFeedback}
-          onDelete={handleDeleteInsight}
+          onDelete={handleDeleteSession}
           onViewDetails={handleViewDetails}
+          onVisualize={handleVisualizeSession}
+          onReplay={handleReplaySession}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -428,12 +434,13 @@ const AIInsights: React.FC = () => {
       </TabPanel>
 
       <TabPanel value={tabValue} index={1}>
-        <AIInsightGrid
-          insights={insightsByCategory.security}
+        <SessionGrid
+          sessions={sessionsByStatus.active}
           isLoading={isLoading}
-          onUpdateFeedback={handleUpdateFeedback}
-          onDelete={handleDeleteInsight}
+          onDelete={handleDeleteSession}
           onViewDetails={handleViewDetails}
+          onVisualize={handleVisualizeSession}
+          onReplay={handleReplaySession}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -447,12 +454,13 @@ const AIInsights: React.FC = () => {
       </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        <AIInsightGrid
-          insights={insightsByCategory.performance}
+        <SessionGrid
+          sessions={sessionsByType.http}
           isLoading={isLoading}
-          onUpdateFeedback={handleUpdateFeedback}
-          onDelete={handleDeleteInsight}
+          onDelete={handleDeleteSession}
           onViewDetails={handleViewDetails}
+          onVisualize={handleVisualizeSession}
+          onReplay={handleReplaySession}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -466,12 +474,13 @@ const AIInsights: React.FC = () => {
       </TabPanel>
 
       <TabPanel value={tabValue} index={3}>
-        <AIInsightGrid
-          insights={insightsByConfidence.high}
+        <SessionGrid
+          sessions={sessionsByType.https}
           isLoading={isLoading}
-          onUpdateFeedback={handleUpdateFeedback}
-          onDelete={handleDeleteInsight}
+          onDelete={handleDeleteSession}
           onViewDetails={handleViewDetails}
+          onVisualize={handleVisualizeSession}
+          onReplay={handleReplaySession}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -485,12 +494,13 @@ const AIInsights: React.FC = () => {
       </TabPanel>
 
       <TabPanel value={tabValue} index={4}>
-        <AIInsightGrid
-          insights={insightsByCategory.compliance}
+        <SessionGrid
+          sessions={sessionsByType.api}
           isLoading={isLoading}
-          onUpdateFeedback={handleUpdateFeedback}
-          onDelete={handleDeleteInsight}
+          onDelete={handleDeleteSession}
           onViewDetails={handleViewDetails}
+          onVisualize={handleVisualizeSession}
+          onReplay={handleReplaySession}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -503,23 +513,23 @@ const AIInsights: React.FC = () => {
         />
       </TabPanel>
 
-      {/* Create AI Insight Dialog */}
+      {/* Create Session Dialog */}
       <Dialog
         open={showCreateDialog}
         onClose={() => setShowCreateDialog(false)}
         maxWidth="lg"
         fullWidth
       >
-        <DialogTitle>Generate AI Insight</DialogTitle>
+        <DialogTitle>Create New Session</DialogTitle>
         <DialogContent>
-          <AIInsightForm
-            onSubmit={handleCreateInsight}
+          <SessionForm
+            onSubmit={handleCreateSession}
             onCancel={() => setShowCreateDialog(false)}
           />
         </DialogContent>
       </Dialog>
 
-      {/* AI Insight Details Dialog */}
+      {/* Session Details Dialog */}
       <Dialog
         open={showDetailsDialog}
         onClose={() => setShowDetailsDialog(false)}
@@ -529,10 +539,10 @@ const AIInsights: React.FC = () => {
           sx: { height: '90vh' }
         }}
       >
-        <DialogTitle>AI Insight Details - {selectedInsight?.title}</DialogTitle>
+        <DialogTitle>Session Details - {selectedSession?.name}</DialogTitle>
         <DialogContent>
-          {selectedInsight && (
-            <AIInsightDetails insight={selectedInsight} />
+          {selectedSession && (
+            <SessionDetails session={selectedSession} />
           )}
         </DialogContent>
         <DialogActions>
@@ -540,17 +550,38 @@ const AIInsights: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      {/* Export Dialog */}
+      {/* Session Visualizer Dialog */}
+      <Dialog
+        open={showVisualizerDialog}
+        onClose={() => setShowVisualizerDialog(false)}
+        maxWidth="xl"
+        fullWidth
+        PaperProps={{
+          sx: { height: '95vh' }
+        }}
+      >
+        <DialogTitle>Session Visualization - {selectedSession?.name}</DialogTitle>
+        <DialogContent>
+          {selectedSession && (
+            <SessionVisualizer session={selectedSession} />
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowVisualizerDialog(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Import/Export Dialog */}
       <Dialog
         open={showExportDialog}
         onClose={() => setShowExportDialog(false)}
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle>Export AI Insights</DialogTitle>
+        <DialogTitle>Import/Export Sessions</DialogTitle>
         <DialogContent>
-          <AIInsightExport
-            insights={filteredInsights}
+          <SessionExport
+            sessions={filteredSessions}
             onClose={() => setShowExportDialog(false)}
           />
         </DialogContent>
@@ -559,4 +590,4 @@ const AIInsights: React.FC = () => {
   )
 }
 
-export default AIInsights
+export default Sessions

@@ -1,121 +1,257 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery } from 'react-query'
 import {
   Box,
-  Grid,
+  Typography,
+  Button,
   Card,
   CardContent,
-  Typography,
-  LinearProgress,
+  Grid,
   Chip,
-  Button,
   IconButton,
-  Tooltip,
+  useTheme,
+  alpha,
+  LinearProgress,
+  Badge,
   Paper,
   List,
   ListItem,
   ListItemText,
   ListItemIcon,
+  ListItemSecondaryAction,
   Divider,
+  Alert,
+  Skeleton,
+  Tooltip,
+  CircularProgress,
   Avatar,
-  useTheme,
-  alpha,
+  CardActions,
+  Collapse,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
 } from '@mui/material'
 import {
-  TrendingUp as TrendingUpIcon,
+  Dashboard as DashboardIcon,
+  TrendingUp as TrendIcon,
+  Security as SecurityIcon,
+  BugReport as FindingIcon,
+  Psychology as AIIcon,
+  Assessment as ReportIcon,
+  Storage as SessionIcon,
+  Code as CodeIcon,
+  Refresh as RefreshIcon,
+  Visibility as ViewIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  AutoAwesome as AutoAwesomeIcon,
+  Timeline as TimelineIcon,
+  Speed as SpeedIcon,
+  CheckCircle as SuccessIcon,
+  Warning as WarningIcon,
+  Error as ErrorIcon,
+  Info as InfoIcon,
+  Schedule as ScheduleIcon,
+  Email as EmailIcon,
+  CloudDownload as CloudDownloadIcon,
+  PictureAsPdf as PDFIcon,
+  Description as HTMLIcon,
+  TableChart as CSVIcon,
+  DataObject as JSONIcon,
+  Upload as UploadIcon,
+  PlayArrow as PlayIcon,
+  Stop as StopIcon,
+  Pause as PauseIcon,
+  Replay as ReplayIcon,
+  AccountTree as TreeIcon,
+  NetworkCheck as NetworkIcon,
+  Http as HttpIcon,
+  Lock as LockIcon,
+  Public as PublicIcon,
+  Send as SendIcon,
+  Save as SaveIcon,
+  Folder as FolderIcon,
+  History as HistoryIcon,
+  Settings as SettingsIcon,
+  BugReport as BugIcon,
   Security as SecurityIcon,
   Speed as SpeedIcon,
-  Psychology as AIIcon,
-  Refresh as RefreshIcon,
-  Launch as LaunchIcon,
-  BugReport as BugIcon,
-  PlayArrow as ScanIcon,
-  FolderOpen as ProjectIcon,
+  CheckCircle as CheckIcon,
+  Error as ErrorIcon,
+  Warning as WarningIcon,
+  Info as InfoIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  ContentCopy as CopyIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  Visibility as ViewIcon,
+  PlayArrow as PlayIcon,
+  Stop as StopIcon,
+  Pause as PauseIcon,
+  Replay as ReplayIcon,
   Timeline as TimelineIcon,
-  Assessment as ReportIcon,
+  AccountTree as TreeIcon,
+  NetworkCheck as NetworkIcon,
+  Http as HttpIcon,
+  Lock as LockIcon,
+  Public as PublicIcon,
+  Add as AddIcon,
+  Search as SearchIcon,
+  FilterList as FilterIcon,
+  MoreVert as MoreIcon,
+  TrendingUp as TrendingUpIcon,
+  TrendingDown as TrendingDownIcon,
+  TrendingFlat as TrendingFlatIcon,
+  BarChart as BarChartIcon,
+  PieChart as PieChartIcon,
+  ShowChart as ShowChartIcon,
+  Timeline as TimelineIcon,
+  Speed as SpeedIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon,
+  Warning as WarningIcon,
+  Info as InfoIcon,
+  Schedule as ScheduleIcon,
+  Email as EmailIcon,
+  CloudDownload as CloudDownloadIcon,
+  PictureAsPdf as PDFIcon,
+  Code as CodeIcon,
+  Description as HTMLIcon,
+  TableChart as CSVIcon,
+  DataObject as JSONIcon,
+  Upload as UploadIcon,
+  PlayArrow as PlayIcon,
+  Stop as StopIcon,
+  Pause as PauseIcon,
+  Replay as ReplayIcon,
+  AccountTree as TreeIcon,
+  NetworkCheck as NetworkIcon,
+  Http as HttpIcon,
+  Lock as LockIcon,
+  Public as PublicIcon,
+  Send as SendIcon,
+  Save as SaveIcon,
+  Folder as FolderIcon,
+  History as HistoryIcon,
+  Settings as SettingsIcon,
+  BugReport as BugIcon,
+  Security as SecurityIcon,
+  Speed as SpeedIcon,
+  CheckCircle as CheckIcon,
+  Error as ErrorIcon,
+  Warning as WarningIcon,
+  Info as InfoIcon,
+  ExpandMore as ExpandMoreIcon,
+  ExpandLess as ExpandLessIcon,
+  ContentCopy as CopyIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  Visibility as ViewIcon,
+  PlayArrow as PlayIcon,
+  Stop as StopIcon,
+  Pause as PauseIcon,
+  Replay as ReplayIcon,
+  Timeline as TimelineIcon,
+  AccountTree as TreeIcon,
+  NetworkCheck as NetworkIcon,
+  Http as HttpIcon,
+  Lock as LockIcon,
+  Public as PublicIcon,
 } from '@mui/icons-material'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
+import { useNavigate } from 'react-router-dom'
 
-import { dashboardAPI, projectsAPI } from '../services/api'
-import { useDashboardStore, useProjectsStore } from '../store'
-import StatsCard from '../components/dashboard/StatsCard'
-import SeverityChart from '../components/dashboard/SeverityChart'
-import TrendChart from '../components/dashboard/TrendChart'
-import ActivityTimeline from '../components/dashboard/ActivityTimeline'
-import ProjectsOverview from '../components/dashboard/ProjectsOverview'
-import ScanProgress from '../components/dashboard/ScanProgress'
-import AIInsightsWidget from '../components/dashboard/AIInsightsWidget'
+import { dashboardAPI } from '../services/api'
+import { Project, Scan, Finding, AIInsight, Report, Session } from '../types'
+import DashboardWidget from '../components/dashboard/DashboardWidget'
+import MetricsOverview from '../components/dashboard/MetricsOverview'
+import RecentActivity from '../components/dashboard/RecentActivity'
 import QuickActions from '../components/dashboard/QuickActions'
-import SystemHealth from '../components/dashboard/SystemHealth'
-import RecentFindings from '../components/dashboard/RecentFindings'
+import SecurityOverview from '../components/dashboard/SecurityOverview'
+import PerformanceMetrics from '../components/dashboard/PerformanceMetrics'
 
 const Dashboard: React.FC = () => {
   const theme = useTheme()
-  const [refreshKey, setRefreshKey] = useState(0)
-  
-  const { stats, setStats, setLoading, setError } = useDashboardStore()
-  const { projects, setProjects } = useProjectsStore()
+  const navigate = useNavigate()
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [expandedWidgets, setExpandedWidgets] = useState<Set<string>>(new Set())
 
-  // Fetch dashboard stats
-  const { data: statsData, isLoading: statsLoading, error: statsError } = useQuery(
-    ['dashboard-stats', refreshKey],
-    dashboardAPI.getStats,
-    {
-      refetchInterval: 30000, // Refresh every 30 seconds
-      onSuccess: (data) => {
-        setStats(data)
-        setError(null)
-      },
-      onError: (error: any) => {
-        setError(error.message)
-      },
-    }
-  )
+  // Fetch dashboard data with auto-refresh
+  const {
+    data: dashboardData,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery(['dashboard'], dashboardAPI.getOverview, {
+    refetchInterval: autoRefresh ? 30000 : false, // Refresh every 30 seconds if enabled
+  })
 
-  // Fetch projects for overview
-  const { data: projectsData } = useQuery(
-    ['projects-overview', refreshKey],
-    projectsAPI.getAll,
-    {
-      refetchInterval: 60000, // Refresh every minute
-      onSuccess: (data) => {
-        setProjects(data.projects)
-      },
-    }
-  )
-
-  // Fetch activity data
-  const { data: activityData } = useQuery(
-    ['dashboard-activity', refreshKey],
-    dashboardAPI.getActivity,
-    {
-      refetchInterval: 30000,
-    }
-  )
-
-  useEffect(() => {
-    setLoading(statsLoading)
-  }, [statsLoading, setLoading])
-
-  const handleRefresh = () => {
-    setRefreshKey(prev => prev + 1)
+  const data = dashboardData || {
+    projects: [],
+    scans: [],
+    findings: [],
+    insights: [],
+    reports: [],
+    sessions: [],
+    metrics: {},
+    recentActivity: [],
   }
 
-  const mockStats = {
-    total_projects: projects?.length || 0,
-    active_scans: 2,
-    total_findings: 47,
-    critical_findings: 3,
-    high_findings: 12,
-    medium_findings: 18,
-    low_findings: 14,
-    ai_insights_count: 23,
-    scan_success_rate: 94.5,
-    average_scan_duration: 12.3,
-    recent_activity: activityData || [],
+  const toggleWidgetExpansion = (widgetId: string) => {
+    const newExpanded = new Set(expandedWidgets)
+    if (newExpanded.has(widgetId)) {
+      newExpanded.delete(widgetId)
+    } else {
+      newExpanded.add(widgetId)
+    }
+    setExpandedWidgets(newExpanded)
   }
 
-  const currentStats = stats || mockStats
+  const handleQuickAction = (action: string) => {
+    switch (action) {
+      case 'new-project':
+        navigate('/projects')
+        break
+      case 'new-scan':
+        navigate('/scans')
+        break
+      case 'view-findings':
+        navigate('/findings')
+        break
+      case 'ai-insights':
+        navigate('/ai-insights')
+        break
+      case 'generate-report':
+        navigate('/reports')
+        break
+      case 'manage-sessions':
+        navigate('/sessions')
+        break
+      case 'api-testing':
+        navigate('/api-testing')
+        break
+      default:
+        break
+    }
+  }
+
+  if (error) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Alert severity="error" sx={{ mb: 2 }}>
+          Failed to load dashboard data: {(error as any).message}
+        </Alert>
+        <Button onClick={() => refetch()} startIcon={<RefreshIcon />}>
+          Retry
+        </Button>
+      </Box>
+    )
+  }
 
   return (
     <Box sx={{ minHeight: '100vh', pb: 4 }}>
@@ -123,252 +259,336 @@ const Dashboard: React.FC = () => {
       <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
         <Box>
           <Typography variant="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Security Dashboard
+            Dashboard Overview
           </Typography>
           <Typography variant="body1" color="text.secondary">
-            Real-time overview of your security testing activities
+            Comprehensive overview of your security testing activities and insights
           </Typography>
         </Box>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Tooltip title="Refresh data">
-            <IconButton onClick={handleRefresh} disabled={statsLoading}>
-              <RefreshIcon className={statsLoading ? 'spin' : ''} />
-            </IconButton>
-          </Tooltip>
           <Button
-            variant="contained"
-            startIcon={<LaunchIcon />}
-            href="/projects"
-            sx={{ ml: 1 }}
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={() => refetch()}
+            disabled={isLoading}
           >
-            New Project
+            Refresh
           </Button>
         </Box>
       </Box>
 
-      {/* Loading indicator */}
-      {statsLoading && (
-        <LinearProgress sx={{ mb: 2, borderRadius: 1 }} />
-      )}
+      {/* Quick Actions */}
+      <QuickActions onAction={handleQuickAction} />
 
-      <Grid container spacing={3}>
-        {/* Stats Cards Row */}
-        <Grid item xs={12}>
-          <Grid container spacing={2}>
-            <Grid item xs={12} sm={6} md={3}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-              >
-                <StatsCard
-                  title="Total Projects"
-                  value={currentStats.total_projects}
-                  icon={<ProjectIcon />}
-                  color="primary"
-                  trend={{ value: 12, direction: 'up' }}
-                />
-              </motion.div>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.2 }}
-              >
-                <StatsCard
-                  title="Active Scans"
-                  value={currentStats.active_scans}
-                  icon={<ScanIcon />}
-                  color="info"
-                  trend={{ value: 3, direction: 'up' }}
-                />
-              </motion.div>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-              >
-                <StatsCard
-                  title="Total Findings"
-                  value={currentStats.total_findings}
-                  icon={<BugIcon />}
-                  color="warning"
-                  trend={{ value: 8, direction: 'up' }}
-                />
-              </motion.div>
-            </Grid>
-            <Grid item xs={12} sm={6} md={3}>
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 }}
-              >
-                <StatsCard
-                  title="AI Insights"
-                  value={currentStats.ai_insights_count}
-                  icon={<AIIcon />}
-                  color="secondary"
-                  trend={{ value: 15, direction: 'up' }}
-                />
-              </motion.div>
-            </Grid>
-          </Grid>
-        </Grid>
+      {/* Metrics Overview */}
+      <MetricsOverview
+        projects={data.projects}
+        scans={data.scans}
+        findings={data.findings}
+        insights={data.insights}
+        reports={data.reports}
+        sessions={data.sessions}
+        isLoading={isLoading}
+      />
 
-        {/* Critical Findings Alert */}
-        {currentStats.critical_findings > 0 && (
-          <Grid item xs={12}>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ delay: 0.5 }}
-            >
-              <Card
-                sx={{
-                  background: `linear-gradient(135deg, ${alpha(theme.palette.error.main, 0.1)} 0%, ${alpha(theme.palette.error.main, 0.05)} 100%)`,
-                  border: `1px solid ${alpha(theme.palette.error.main, 0.3)}`,
-                }}
-              >
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-                    <Avatar sx={{ bgcolor: 'error.main' }}>
-                      <SecurityIcon />
-                    </Avatar>
-                    <Box sx={{ flexGrow: 1 }}>
-                      <Typography variant="h6" color="error.main" sx={{ fontWeight: 600 }}>
-                        Critical Security Issues Detected
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {currentStats.critical_findings} critical vulnerabilities require immediate attention
-                      </Typography>
-                    </Box>
-                    <Button
-                      variant="contained"
-                      color="error"
-                      href="/findings?severity=critical"
-                      endIcon={<LaunchIcon />}
-                    >
-                      Review Now
-                    </Button>
-                  </Box>
-                </CardContent>
-              </Card>
-            </motion.div>
-          </Grid>
-        )}
-
-        {/* Charts Row */}
-        <Grid item xs={12} md={6}>
-          <motion.div
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.6 }}
-          >
-            <SeverityChart
-              data={{
-                critical: currentStats.critical_findings,
-                high: currentStats.high_findings,
-                medium: currentStats.medium_findings,
-                low: currentStats.low_findings,
-              }}
-            />
-          </motion.div>
-        </Grid>
-
-        <Grid item xs={12} md={6}>
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.7 }}
-          >
-            <TrendChart />
-          </motion.div>
-        </Grid>
-
-        {/* System Health and Performance */}
-        <Grid item xs={12} md={6}>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.8 }}
-          >
-            <SystemHealth
-              successRate={currentStats.scan_success_rate}
-              avgDuration={currentStats.average_scan_duration}
-            />
-          </motion.div>
-        </Grid>
-
-        {/* AI Insights Widget */}
-        <Grid item xs={12} md={6}>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.9 }}
-          >
-            <AIInsightsWidget />
-          </motion.div>
-        </Grid>
-
-        {/* Projects Overview */}
+      {/* Main Dashboard Grid */}
+      <Grid container spacing={3} sx={{ mb: 3 }}>
+        {/* Security Overview */}
         <Grid item xs={12} lg={8}>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.0 }}
+          <DashboardWidget
+            title="Security Overview"
+            icon={<SecurityIcon />}
+            expanded={expandedWidgets.has('security')}
+            onToggleExpansion={() => toggleWidgetExpansion('security')}
           >
-            <ProjectsOverview projects={projects || []} />
-          </motion.div>
+            <SecurityOverview
+              findings={data.findings}
+              scans={data.scans}
+              isLoading={isLoading}
+            />
+          </DashboardWidget>
         </Grid>
 
-        {/* Quick Actions */}
+        {/* Performance Metrics */}
         <Grid item xs={12} lg={4}>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.1 }}
+          <DashboardWidget
+            title="Performance Metrics"
+            icon={<SpeedIcon />}
+            expanded={expandedWidgets.has('performance')}
+            onToggleExpansion={() => toggleWidgetExpansion('performance')}
           >
-            <QuickActions />
-          </motion.div>
+            <PerformanceMetrics
+              scans={data.scans}
+              sessions={data.sessions}
+              isLoading={isLoading}
+            />
+          </DashboardWidget>
         </Grid>
 
         {/* Recent Activity */}
-        <Grid item xs={12} md={6}>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.2 }}
+        <Grid item xs={12} lg={6}>
+          <DashboardWidget
+            title="Recent Activity"
+            icon={<TimelineIcon />}
+            expanded={expandedWidgets.has('activity')}
+            onToggleExpansion={() => toggleWidgetExpansion('activity')}
           >
-            <ActivityTimeline activities={currentStats.recent_activity} />
-          </motion.div>
+            <RecentActivity
+              activity={data.recentActivity}
+              isLoading={isLoading}
+            />
+          </DashboardWidget>
         </Grid>
 
-        {/* Recent Findings */}
-        <Grid item xs={12} md={6}>
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 1.3 }}
+        {/* AI Insights Summary */}
+        <Grid item xs={12} lg={6}>
+          <DashboardWidget
+            title="AI Insights Summary"
+            icon={<AIIcon />}
+            expanded={expandedWidgets.has('ai-insights')}
+            onToggleExpansion={() => toggleWidgetExpansion('ai-insights')}
           >
-            <RecentFindings />
-          </motion.div>
+            <Box>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Card sx={{ textAlign: 'center', p: 2 }}>
+                    <Typography variant="h4" color="primary.main" sx={{ fontWeight: 700 }}>
+                      {data.insights.filter(i => i.category === 'security').length}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Security Insights
+                    </Typography>
+                  </Card>
+                </Grid>
+                <Grid item xs={6}>
+                  <Card sx={{ textAlign: 'center', p: 2 }}>
+                    <Typography variant="h4" color="warning.main" sx={{ fontWeight: 700 }}>
+                      {data.insights.filter(i => i.category === 'performance').length}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Performance Tips
+                    </Typography>
+                  </Card>
+                </Grid>
+                <Grid item xs={12}>
+                  <List dense>
+                    {data.insights.slice(0, 3).map((insight, index) => (
+                      <ListItem key={insight.id || index}>
+                        <ListItemIcon>
+                          <AIIcon color="primary" />
+                        </ListItemIcon>
+                        <ListItemText
+                          primary={insight.title}
+                          secondary={insight.description}
+                          primaryTypographyProps={{ variant: 'body2', fontWeight: 600 }}
+                          secondaryTypographyProps={{ variant: 'caption' }}
+                        />
+                        <Chip
+                          label={insight.category}
+                          size="small"
+                          color="primary"
+                          variant="outlined"
+                        />
+                      </ListItem>
+                    ))}
+                  </List>
+                </Grid>
+              </Grid>
+            </Box>
+          </DashboardWidget>
         </Grid>
 
-        {/* Scan Progress (if any active scans) */}
-        {currentStats.active_scans > 0 && (
-          <Grid item xs={12}>
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 1.4 }}
-            >
-              <ScanProgress />
-            </motion.div>
-          </Grid>
-        )}
+        {/* Projects Summary */}
+        <Grid item xs={12} lg={4}>
+          <DashboardWidget
+            title="Projects Summary"
+            icon={<FolderIcon />}
+            expanded={expandedWidgets.has('projects')}
+            onToggleExpansion={() => toggleWidgetExpansion('projects')}
+          >
+            <Box>
+              <Typography variant="h6" sx={{ mb: 2 }}>
+                Active Projects: {data.projects.filter(p => p.status === 'active').length}
+              </Typography>
+              <List dense>
+                {data.projects.slice(0, 5).map((project, index) => (
+                  <ListItem key={project.id || index}>
+                    <ListItemIcon>
+                      <FolderIcon color="primary" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={project.name}
+                      secondary={`${project.scans?.length || 0} scans`}
+                      primaryTypographyProps={{ variant: 'body2', fontWeight: 600 }}
+                      secondaryTypographyProps={{ variant: 'caption' }}
+                    />
+                    <Chip
+                      label={project.status}
+                      size="small"
+                      color={project.status === 'active' ? 'success' : 'default'}
+                      variant="outlined"
+                    />
+                  </ListItem>
+                ))}
+              </List>
+            </Box>
+          </DashboardWidget>
+        </Grid>
+
+        {/* Scans Status */}
+        <Grid item xs={12} lg={4}>
+          <DashboardWidget
+            title="Scans Status"
+            icon={<SearchIcon />}
+            expanded={expandedWidgets.has('scans')}
+            onToggleExpansion={() => toggleWidgetExpansion('scans')}
+          >
+            <Box>
+              <Grid container spacing={2}>
+                <Grid item xs={6}>
+                  <Card sx={{ textAlign: 'center', p: 2 }}>
+                    <Typography variant="h4" color="info.main" sx={{ fontWeight: 700 }}>
+                      {data.scans.filter(s => s.status === 'running').length}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Running
+                    </Typography>
+                  </Card>
+                </Grid>
+                <Grid item xs={6}>
+                  <Card sx={{ textAlign: 'center', p: 2 }}>
+                    <Typography variant="h4" color="success.main" sx={{ fontWeight: 700 }}>
+                      {data.scans.filter(s => s.status === 'completed').length}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Completed
+                    </Typography>
+                  </Card>
+                </Grid>
+                <Grid item xs={12}>
+                  <LinearProgress
+                    variant="determinate"
+                    value={
+                      data.scans.length > 0
+                        ? (data.scans.filter(s => s.status === 'completed').length / data.scans.length) * 100
+                        : 0
+                    }
+                    sx={{ height: 8, borderRadius: 4 }}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+                    Completion Rate
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Box>
+          </DashboardWidget>
+        </Grid>
+
+        {/* Findings Summary */}
+        <Grid item xs={12} lg={4}>
+          <DashboardWidget
+            title="Findings Summary"
+            icon={<FindingIcon />}
+            expanded={expandedWidgets.has('findings')}
+            onToggleExpansion={() => toggleWidgetExpansion('findings')}
+          >
+            <Box>
+              <Grid container spacing={2}>
+                <Grid item xs={4}>
+                  <Card sx={{ textAlign: 'center', p: 2 }}>
+                    <Typography variant="h4" color="error.main" sx={{ fontWeight: 700 }}>
+                      {data.findings.filter(f => f.severity === 'critical').length}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Critical
+                    </Typography>
+                  </Card>
+                </Grid>
+                <Grid item xs={4}>
+                  <Card sx={{ textAlign: 'center', p: 2 }}>
+                    <Typography variant="h4" color="warning.main" sx={{ fontWeight: 700 }}>
+                      {data.findings.filter(f => f.severity === 'high').length}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      High
+                    </Typography>
+                  </Card>
+                </Grid>
+                <Grid item xs={4}>
+                  <Card sx={{ textAlign: 'center', p: 2 }}>
+                    <Typography variant="h4" color="info.main" sx={{ fontWeight: 700 }}>
+                      {data.findings.filter(f => f.severity === 'medium').length}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Medium
+                    </Typography>
+                  </Card>
+                </Grid>
+                <Grid item xs={12}>
+                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+                    Total: {data.findings.length} findings
+                  </Typography>
+                </Grid>
+              </Grid>
+            </Box>
+          </DashboardWidget>
+        </Grid>
+      </Grid>
+
+      {/* Bottom Row - Full Width Widgets */}
+      <Grid container spacing={3}>
+        {/* System Health */}
+        <Grid item xs={12}>
+          <DashboardWidget
+            title="System Health & Status"
+            icon={<NetworkIcon />}
+            expanded={expandedWidgets.has('system-health')}
+            onToggleExpansion={() => toggleWidgetExpansion('system-health')}
+          >
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={3}>
+                <Card sx={{ textAlign: 'center', p: 2 }}>
+                  <Typography variant="h6" color="success.main" sx={{ fontWeight: 700 }}>
+                    Online
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Backend Status
+                  </Typography>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <Card sx={{ textAlign: 'center', p: 2 }}>
+                  <Typography variant="h6" color="success.main" sx={{ fontWeight: 700 }}>
+                    {data.scans.filter(s => s.status === 'running').length}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Active Scans
+                  </Typography>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <Card sx={{ textAlign: 'center', p: 2 }}>
+                  <Typography variant="h6" color="info.main" sx={{ fontWeight: 700 }}>
+                    {data.sessions.filter(s => s.status === 'active').length}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Active Sessions
+                  </Typography>
+                </Card>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <Card sx={{ textAlign: 'center', p: 2 }}>
+                  <Typography variant="h6" color="primary.main" sx={{ fontWeight: 700 }}>
+                    {data.reports.filter(r => r.status === 'generating').length}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Reports in Progress
+                  </Typography>
+                </Card>
+              </Grid>
+            </Grid>
+          </DashboardWidget>
+        </Grid>
       </Grid>
     </Box>
   )

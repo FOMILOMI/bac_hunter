@@ -1,42 +1,51 @@
-// Core types for BAC Hunter application
-
-export interface Project {
+// Base types
+export interface BaseEntity {
   id: string
-  name: string
-  description: string
-  target_url: string
-  status: 'created' | 'scanning' | 'completed' | 'failed' | 'paused'
-  scan_config: ScanConfig
   created_at: string
-  updated_at?: string
-  scan_count: number
-  finding_count: number
-  ai_insights_count?: number
-  last_scan_at?: string
+  updated_at: string
+}
+
+// Project types
+export interface Project extends BaseEntity {
+  name: string
+  description?: string
+  status: 'active' | 'inactive' | 'archived'
+  target_urls: string[]
+  scan_config: ScanConfig
+  findings_count?: number
+  scans_count?: number
+  last_scan_date?: string
   tags?: string[]
+  metadata?: Record<string, any>
 }
 
 export interface ScanConfig {
-  scan_type: 'quick' | 'comprehensive' | 'stealth' | 'aggressive' | 'custom'
-  ai_enabled: boolean
-  rl_optimization: boolean
-  max_rps: number
-  timeout: number
-  phases: ScanPhase[]
-  authentication?: AuthConfig
+  scan_type: 'full' | 'quick' | 'custom'
+  target_scope: 'domain' | 'subdomain' | 'path' | 'custom'
+  authentication?: AuthenticationConfig
+  rate_limiting?: RateLimitingConfig
   custom_headers?: Record<string, string>
-  proxy?: ProxyConfig
+  proxy_settings?: ProxyConfig
+  scan_depth: number
+  max_threads: number
+  timeout: number
+  follow_redirects: boolean
+  verify_ssl: boolean
 }
 
-export interface AuthConfig {
-  type: 'none' | 'basic' | 'bearer' | 'cookie' | 'custom'
-  credentials?: {
-    username?: string
-    password?: string
-    token?: string
-    cookie?: string
-    headers?: Record<string, string>
-  }
+export interface AuthenticationConfig {
+  type: 'none' | 'basic' | 'bearer' | 'cookie' | 'form'
+  username?: string
+  password?: string
+  token?: string
+  cookie_data?: Record<string, string>
+  form_data?: Record<string, string>
+}
+
+export interface RateLimitingConfig {
+  requests_per_second: number
+  delay_between_requests: number
+  burst_limit: number
 }
 
 export interface ProxyConfig {
@@ -45,215 +54,231 @@ export interface ProxyConfig {
   port: number
   username?: string
   password?: string
+  type: 'http' | 'https' | 'socks4' | 'socks5'
 }
 
-export type ScanPhase = 'recon' | 'access' | 'audit' | 'exploit' | 'report'
-
-export interface Scan {
-  id: string
+// Scan types
+export interface Scan extends BaseEntity {
   project_id: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled'
+  name: string
+  description?: string
+  status: 'queued' | 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
+  scan_type: string
+  target_urls: string[]
   progress: number
-  current_phase?: ScanPhase
-  started_at: string
-  completed_at?: string
-  duration?: number
+  current_phase: string
+  phases: ScanPhase[]
   findings_count: number
-  errors_count: number
-  config: ScanConfig
-  metrics: ScanMetrics
-}
-
-export interface ScanMetrics {
+  duration: number
+  requests_per_second: number
   total_requests: number
-  successful_requests: number
-  failed_requests: number
-  average_response_time: number
-  endpoints_discovered: number
-  parameters_tested: number
-  payloads_executed: number
+  completed_requests: number
+  start_time: string
+  end_time?: string
+  error_message?: string
+  scan_config: ScanConfig
+  metadata?: Record<string, any>
 }
 
-export interface Finding {
-  id: string
+export interface ScanPhase {
+  name: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  progress: number
+  start_time?: string
+  end_time?: string
+  description: string
+  findings_count: number
+}
+
+// Finding types
+export interface Finding extends BaseEntity {
   project_id: string
   scan_id: string
-  type: string
   title: string
   description: string
   severity: 'critical' | 'high' | 'medium' | 'low' | 'info'
-  confidence: number
+  status: 'open' | 'in_progress' | 'resolved' | 'false_positive' | 'duplicate'
+  type: string
+  cvss_score?: number
+  cvss_vector?: string
   url: string
-  method: string
   parameter?: string
-  payload?: string
-  request: HTTPRequest
-  response: HTTPResponse
-  evidence: Evidence[]
+  evidence: string
+  request_data?: RequestData
+  response_data?: ResponseData
   remediation: string
-  references: string[]
-  status: 'new' | 'confirmed' | 'false_positive' | 'resolved' | 'ignored'
-  created_at: string
-  updated_at?: string
+  references?: string[]
   tags?: string[]
+  metadata?: Record<string, any>
 }
 
-export interface HTTPRequest {
+export interface RequestData {
   method: string
   url: string
   headers: Record<string, string>
   body?: string
-  timestamp: string
+  parameters?: Record<string, string>
 }
 
-export interface HTTPResponse {
+export interface ResponseData {
   status_code: number
   headers: Record<string, string>
-  body: string
-  size: number
+  body?: string
   response_time: number
-  timestamp: string
 }
 
-export interface Evidence {
-  type: 'request' | 'response' | 'screenshot' | 'log' | 'diff'
-  title: string
-  content: string
-  metadata?: Record<string, any>
-}
-
-export interface AIInsight {
-  id: string
+// AI Insight types
+export interface AIInsight extends BaseEntity {
   project_id?: string
   scan_id?: string
-  finding_id?: string
-  type: 'recommendation' | 'anomaly' | 'pattern' | 'prediction' | 'optimization'
   title: string
   description: string
+  category: 'security' | 'performance' | 'compliance' | 'best_practices' | 'optimization'
   confidence: number
-  priority: 'low' | 'medium' | 'high' | 'critical'
-  category: string
-  data: Record<string, any>
-  action_items: string[]
-  created_at: string
-  status: 'new' | 'reviewed' | 'implemented' | 'dismissed'
-}
-
-export interface Recommendation {
-  id: string
-  title: string
-  description: string
-  type: 'security' | 'performance' | 'configuration' | 'methodology'
-  priority: 'low' | 'medium' | 'high' | 'critical'
-  confidence: number
-  action_items: string[]
-  estimated_effort: string
-  risk_level: string
-  references?: string[]
-}
-
-export interface Target {
-  id: string
-  base_url: string
-  finding_count: number
-  last_scan_at?: string
-  status: 'active' | 'inactive'
+  recommendation: string
+  impact: 'high' | 'medium' | 'low'
+  priority: 'urgent' | 'high' | 'medium' | 'low'
+  feedback?: InsightFeedback
+  related_findings?: string[]
+  tags?: string[]
   metadata?: Record<string, any>
 }
 
-export interface Session {
-  id: string
+export interface InsightFeedback {
+  rating: number
+  comment?: string
+  helpful: boolean
+  submitted_at: string
+  user_id?: string
+}
+
+// Report types
+export interface Report extends BaseEntity {
+  project_id?: string
+  scan_id?: string
+  title: string
+  description?: string
+  type: 'executive' | 'technical' | 'compliance' | 'detailed' | 'custom'
+  status: 'draft' | 'generating' | 'completed' | 'failed' | 'scheduled'
+  format: 'pdf' | 'html' | 'json' | 'csv'
+  content: ReportContent
+  template_id?: string
+  scheduled_at?: string
+  generated_at?: string
+  file_size?: number
+  download_url?: string
+  metadata?: Record<string, any>
+}
+
+export interface ReportContent {
+  summary: ReportSummary
+  findings: Finding[]
+  insights: AIInsight[]
+  scans: Scan[]
+  recommendations: string[]
+  charts: ReportChart[]
+  metadata: Record<string, any>
+}
+
+export interface ReportSummary {
+  total_findings: number
+  critical_findings: number
+  high_findings: number
+  medium_findings: number
+  low_findings: number
+  scan_duration: number
+  target_urls: string[]
+  scan_date: string
+}
+
+export interface ReportChart {
+  type: 'pie' | 'bar' | 'line' | 'radar'
+  title: string
+  data: any
+  options?: any
+}
+
+// Session types
+export interface Session extends BaseEntity {
+  project_id?: string
+  scan_id?: string
   name: string
-  target_url: string
+  description?: string
+  type: 'http' | 'https' | 'websocket' | 'api' | 'custom'
+  status: 'active' | 'inactive' | 'expired' | 'suspended'
   requests: SessionRequest[]
-  created_at: string
-  updated_at?: string
-  status: 'active' | 'archived'
-  metadata?: Record<string, any>
+  metadata: SessionMetadata
+  tags?: string[]
 }
 
 export interface SessionRequest {
   id: string
+  timestamp: string
   method: string
   url: string
   headers: Record<string, string>
   body?: string
-  response?: HTTPResponse
-  timestamp: string
-  tags?: string[]
-}
-
-export interface Endpoint {
-  url: string
-  method: string
-  parameters: Parameter[]
-  status_codes: number[]
-  response_types: string[]
-  authentication_required: boolean
-  rate_limited: boolean
-  discovered_at: string
-  last_tested_at?: string
-}
-
-export interface Parameter {
-  name: string
-  type: 'query' | 'body' | 'header' | 'path' | 'cookie'
-  data_type: 'string' | 'number' | 'boolean' | 'array' | 'object'
-  required: boolean
-  default_value?: string
-  examples?: string[]
-  vulnerable: boolean
-  tested_payloads: string[]
-}
-
-export interface Vulnerability {
-  cve_id?: string
-  cwe_id?: string
-  name: string
-  description: string
-  severity: 'critical' | 'high' | 'medium' | 'low'
-  impact: string
-  remediation: string
-  references: string[]
-}
-
-export interface Report {
-  id: string
-  project_id: string
-  name: string
-  type: 'executive' | 'technical' | 'compliance' | 'custom'
-  format: 'html' | 'pdf' | 'json' | 'csv' | 'xml'
-  template: string
-  config: ReportConfig
-  generated_at: string
-  file_path?: string
+  response_status?: number
+  response_headers?: Record<string, string>
+  response_body?: string
+  response_time?: number
   size?: number
-  status: 'generating' | 'completed' | 'failed'
 }
 
-export interface ReportConfig {
-  include_executive_summary: boolean
-  include_methodology: boolean
-  include_findings: boolean
-  include_recommendations: boolean
-  include_appendices: boolean
-  finding_filters: FindingFilter[]
-  custom_sections: CustomSection[]
+export interface SessionMetadata {
+  total_requests: number
+  unique_urls: number
+  methods_used: string[]
+  status_codes: Record<number, number>
+  average_response_time: number
+  total_size: number
+  start_time: string
+  end_time?: string
 }
 
-export interface FindingFilter {
-  field: keyof Finding
-  operator: 'equals' | 'contains' | 'greater_than' | 'less_than' | 'in'
-  value: any
+// API Testing types
+export interface APIRequest {
+  id?: string
+  name?: string
+  method: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD' | 'OPTIONS'
+  url: string
+  headers: Record<string, string>
+  body?: string
+  params?: Record<string, string>
+  auth?: AuthenticationConfig
+  timeout?: number
+  follow_redirects?: boolean
+  verify_ssl?: boolean
+  metadata?: Record<string, any>
 }
 
-export interface CustomSection {
-  title: string
-  content: string
-  position: number
+export interface APIResponse {
+  id?: string
+  request_id?: string
+  status_code: number
+  status_text: string
+  headers: Record<string, string>
+  body: string
+  response_time: number
+  size: number
+  timestamp: string
+  error?: string
+  metadata?: Record<string, any>
 }
 
-export interface DashboardStats {
+// Dashboard types
+export interface DashboardData {
+  projects: Project[]
+  scans: Scan[]
+  findings: Finding[]
+  insights: AIInsight[]
+  reports: Report[]
+  sessions: Session[]
+  metrics: DashboardMetrics
+  recentActivity: ActivityItem[]
+}
+
+export interface DashboardMetrics {
   total_projects: number
   active_scans: number
   total_findings: number
@@ -262,114 +287,295 @@ export interface DashboardStats {
   medium_findings: number
   low_findings: number
   ai_insights_count: number
-  recent_activity: ActivityItem[]
   scan_success_rate: number
   average_scan_duration: number
+  total_reports: number
+  active_sessions: number
 }
 
 export interface ActivityItem {
   id: string
-  type: 'scan_started' | 'scan_completed' | 'finding_discovered' | 'project_created' | 'ai_insight_generated'
+  type: 'project_created' | 'scan_started' | 'scan_completed' | 'finding_discovered' | 'insight_generated' | 'report_created'
   title: string
   description: string
   timestamp: string
-  project_id?: string
-  scan_id?: string
-  finding_id?: string
+  user_id?: string
+  entity_id?: string
+  entity_type?: string
+  metadata?: Record<string, any>
 }
 
-export interface WebSocketMessage {
-  type: string
-  data: any
-  timestamp: string
+// User types
+export interface User extends BaseEntity {
+  username: string
+  email: string
+  first_name?: string
+  last_name?: string
+  role: 'admin' | 'user' | 'viewer'
+  status: 'active' | 'inactive' | 'suspended'
+  preferences: UserPreferences
+  last_login?: string
+  permissions: string[]
 }
 
+export interface UserPreferences {
+  theme: 'light' | 'dark' | 'auto'
+  language: string
+  timezone: string
+  notifications: NotificationSettings
+  dashboard_layout?: any
+}
+
+export interface NotificationSettings {
+  email: boolean
+  push: boolean
+  critical_findings: boolean
+  scan_completion: boolean
+  system_alerts: boolean
+}
+
+// Template types
+export interface Template extends BaseEntity {
+  name: string
+  description?: string
+  type: 'scan' | 'report' | 'session' | 'api_request'
+  content: any
+  category: string
+  tags?: string[]
+  is_default: boolean
+  metadata?: Record<string, any>
+}
+
+// Export types
+export interface ExportOptions {
+  format: 'json' | 'csv' | 'xml' | 'pdf' | 'html'
+  include_metadata?: boolean
+  include_attachments?: boolean
+  filters?: Record<string, any>
+  date_range?: {
+    start: string
+    end: string
+  }
+}
+
+// Configuration types
+export interface SystemConfig {
+  scan_settings: ScanSystemConfig
+  security_settings: SecurityConfig
+  performance_settings: PerformanceConfig
+  notification_settings: NotificationConfig
+}
+
+export interface ScanSystemConfig {
+  default_timeout: number
+  max_concurrent_scans: number
+  default_rate_limit: number
+  max_scan_duration: number
+  allowed_scan_types: string[]
+}
+
+export interface SecurityConfig {
+  require_authentication: boolean
+  session_timeout: number
+  max_login_attempts: number
+  password_policy: PasswordPolicy
+  ip_whitelist?: string[]
+}
+
+export interface PasswordPolicy {
+  min_length: number
+  require_uppercase: boolean
+  require_lowercase: boolean
+  require_numbers: boolean
+  require_special_chars: boolean
+  max_age_days: number
+}
+
+export interface PerformanceConfig {
+  max_memory_usage: number
+  max_cpu_usage: number
+  database_connection_limit: number
+  cache_enabled: boolean
+  cache_ttl: number
+}
+
+export interface NotificationConfig {
+  smtp_enabled: boolean
+  smtp_host?: string
+  smtp_port?: number
+  smtp_username?: string
+  smtp_password?: string
+  webhook_urls?: string[]
+}
+
+// Learning types
+export interface Tutorial extends BaseEntity {
+  title: string
+  description: string
+  content: string
+  category: string
+  difficulty: 'beginner' | 'intermediate' | 'advanced'
+  duration_minutes: number
+  prerequisites?: string[]
+  tags?: string[]
+  is_published: boolean
+}
+
+export interface LearningPath extends BaseEntity {
+  user_id: string
+  name: string
+  description: string
+  tutorials: string[]
+  progress: LearningProgress
+  estimated_completion: string
+  is_active: boolean
+}
+
+export interface LearningProgress {
+  completed_tutorials: string[]
+  current_tutorial?: string
+  total_progress: number
+  last_activity: string
+  achievements: string[]
+}
+
+// Error types
 export interface APIError {
   message: string
-  code?: string
-  details?: Record<string, any>
+  code: string
+  details?: any
+  timestamp: string
+  request_id?: string
 }
 
+// Pagination types
 export interface PaginationParams {
   page: number
-  limit: number
-  sort?: string
-  order?: 'asc' | 'desc'
+  page_size: number
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
 }
 
 export interface PaginatedResponse<T> {
   items: T[]
   total: number
   page: number
-  limit: number
-  has_more: boolean
+  page_size: number
+  total_pages: number
+  has_next: boolean
+  has_previous: boolean
 }
 
-export interface FilterParams {
+// Filter types
+export interface FilterOptions {
   search?: string
   status?: string[]
-  severity?: string[]
   type?: string[]
-  date_from?: string
-  date_to?: string
+  severity?: string[]
+  category?: string[]
+  date_range?: {
+    start: string
+    end: string
+  }
+  tags?: string[]
+  user_id?: string
   project_id?: string
   scan_id?: string
 }
 
-// Chart and visualization types
-export interface ChartData {
-  labels: string[]
-  datasets: ChartDataset[]
+// WebSocket types
+export interface WebSocketMessage {
+  type: string
+  data: any
+  timestamp: string
+  user_id?: string
 }
 
-export interface ChartDataset {
-  label: string
-  data: number[]
-  backgroundColor?: string | string[]
-  borderColor?: string | string[]
-  borderWidth?: number
-  fill?: boolean
+export interface WebSocketEvent {
+  event: string
+  data: any
+  timestamp: string
 }
 
-export interface NetworkGraphNode {
+// File types
+export interface FileUpload {
   id: string
-  label: string
-  group: string
+  filename: string
+  original_name: string
   size: number
+  mime_type: string
+  upload_date: string
+  status: 'uploading' | 'completed' | 'failed'
+  progress: number
+  url?: string
+  metadata?: Record<string, any>
+}
+
+// Audit types
+export interface AuditLog extends BaseEntity {
+  user_id?: string
+  action: string
+  resource_type: string
+  resource_id: string
+  details: any
+  ip_address?: string
+  user_agent?: string
+  success: boolean
+  error_message?: string
+}
+
+// Health check types
+export interface HealthStatus {
+  status: 'healthy' | 'degraded' | 'unhealthy'
+  timestamp: string
+  checks: HealthCheck[]
+  overall_health: number
+}
+
+export interface HealthCheck {
+  name: string
+  status: 'pass' | 'fail' | 'warn'
+  response_time: number
+  details?: any
+  error?: string
+}
+
+// Statistics types
+export interface Statistics {
+  overview: OverviewStats
+  trends: TrendData[]
+  distributions: DistributionData[]
+  performance: PerformanceStats
+}
+
+export interface OverviewStats {
+  total_projects: number
+  total_scans: number
+  total_findings: number
+  total_insights: number
+  total_reports: number
+  total_sessions: number
+  active_users: number
+}
+
+export interface TrendData {
+  date: string
+  value: number
+  change: number
+  change_percentage: number
+}
+
+export interface DistributionData {
+  category: string
+  count: number
+  percentage: number
   color?: string
-  x?: number
-  y?: number
 }
 
-export interface NetworkGraphEdge {
-  from: string
-  to: string
-  label?: string
-  width?: number
-  color?: string
-}
-
-export interface HeatmapData {
-  x: string[]
-  y: string[]
-  z: number[][]
-}
-
-// Configuration types
-export interface AppConfig {
-  api_base_url: string
-  websocket_url: string
-  max_file_size: number
-  supported_formats: string[]
-  default_scan_config: ScanConfig
-  ui_preferences: UIPreferences
-}
-
-export interface UIPreferences {
-  theme: 'dark' | 'light' | 'auto'
-  sidebar_collapsed: boolean
-  default_page_size: number
-  auto_refresh_interval: number
-  show_tooltips: boolean
-  compact_mode: boolean
+export interface PerformanceStats {
+  average_scan_duration: number
+  scan_success_rate: number
+  average_response_time: number
+  throughput: number
+  error_rate: number
 }
