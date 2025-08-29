@@ -1,442 +1,544 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import {
   Box,
   Grid,
   Card,
   CardContent,
   Typography,
+  Button,
   Chip,
   LinearProgress,
   IconButton,
   Tooltip,
   Alert,
   Skeleton,
-  Button,
+  Divider,
+  useTheme,
+  useMediaQuery
 } from '@mui/material'
 import {
-  PlayArrow as PlayIcon,
-  Stop as StopIcon,
-  Refresh as RefreshIcon,
-  TrendingUp as TrendingUpIcon,
-  BugReport as BugIcon,
-  Security as SecurityIcon,
-  Speed as SpeedIcon,
-  Psychology as AIIcon,
+  Security,
+  BugReport,
+  Target,
+  Timeline,
+  Refresh,
+  Add,
+  TrendingUp,
+  TrendingDown,
+  Warning,
+  CheckCircle,
+  Error,
+  Info
 } from '@mui/icons-material'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import { LineChart, Line, AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'react-hot-toast'
+import { motion } from 'framer-motion'
 
-import APIService, { ScanRequest } from '../services/api'
-import { useDashboardStore } from '../store/dashboardStore'
-import { useWebSocketStore } from '../store/webSocketStore'
-import StatusIndicator from '../components/StatusIndicator'
+import { api } from '../services/api'
+import { useWebSocket } from '../hooks/useWebSocket'
+import { StatusIndicator } from '../components/StatusIndicator'
+import { ScanProgressCard } from '../components/scans/ScanProgressCard'
+import { RecentFindingsTable } from '../components/findings/RecentFindingsTable'
+import { QuickActionsPanel } from '../components/dashboard/QuickActionsPanel'
+import { SystemHealthCard } from '../components/dashboard/SystemHealthCard'
+import { AIInsightsCard } from '../components/dashboard/AIInsightsCard'
+
+// Types
+interface DashboardStats {
+  total_targets: number
+  total_findings: number
+  total_scans: number
+  severity_distribution: {
+    critical: number
+    high: number
+    medium: number
+    low: number
+  }
+  last_scan: string
+  system_health: string
+}
+
+interface ActiveScan {
+  id: string
+  target: string
+  progress: number
+  status: string
+  mode: string
+  started_at: string
+}
+
+interface RecentFinding {
+  id: number
+  type: string
+  severity: string
+  url: string
+  target: string
+  created_at: string
+}
 
 const Dashboard: React.FC = () => {
-  const [selectedTimeRange, setSelectedTimeRange] = useState<'24h' | '7d' | '30d'>('24h')
-  const { stats, setStats } = useDashboardStore()
-  const { connected } = useWebSocketStore()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'))
   const queryClient = useQueryClient()
-
-  // Fetch dashboard data
-  const { data: overviewStats, isLoading: statsLoading, error: statsError } = useQuery({
-    queryKey: ['dashboard-stats', selectedTimeRange],
-    queryFn: () => APIService.getOverviewStats(),
-    refetchInterval: 30000, // Refresh every 30 seconds
+  
+  // State
+  const [selectedTimeRange, setSelectedTimeRange] = useState<'24h' | '7d' | '30d'>('7d')
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  
+  // WebSocket connection for real-time updates
+  const { messages, sendMessage } = useWebSocket('/ws/dashboard')
+  
+  // API Queries
+  const { data: stats, isLoading: statsLoading, error: statsError } = useQuery({
+    queryKey: ['dashboard', 'stats'],
+    queryFn: () => api.get('/api/stats/overview'),
+    refetchInterval: autoRefresh ? 30000 : false, // Refresh every 30 seconds if auto-refresh is enabled
+    staleTime: 10000, // Consider data stale after 10 seconds
   })
-
-  const { data: targetStats, isLoading: targetStatsLoading } = useQuery({
-    queryKey: ['target-stats'],
-    queryFn: () => APIService.getTargetStats(),
-    refetchInterval: 60000, // Refresh every minute
+  
+  const { data: activeScans, isLoading: scansLoading } = useQuery({
+    queryKey: ['dashboard', 'active-scans'],
+    queryFn: () => api.get('/api/scans?status=running'),
+    refetchInterval: autoRefresh ? 10000 : false, // Refresh every 10 seconds for active scans
   })
-
-  const { data: findingStats, isLoading: findingStatsLoading } = useQuery({
-    queryKey: ['finding-stats'],
-    queryFn: () => APIService.getFindingStats(),
-    refetchInterval: 60000,
+  
+  const { data: recentFindings, isLoading: findingsLoading } = useQuery({
+    queryKey: ['dashboard', 'recent-findings'],
+    queryFn: () => api.get('/api/findings?limit=10'),
+    refetchInterval: autoRefresh ? 60000 : false, // Refresh every minute for findings
   })
-
-  const { data: aiModels, isLoading: aiModelsLoading } = useQuery({
-    queryKey: ['ai-models'],
-    queryFn: () => APIService.listAIModels(),
-    refetchInterval: 120000, // Refresh every 2 minutes
+  
+  const { data: systemStatus, isLoading: systemLoading } = useQuery({
+    queryKey: ['dashboard', 'system-status'],
+    queryFn: () => api.get('/api/system/status'),
+    refetchInterval: autoRefresh ? 15000 : false, // Refresh every 15 seconds for system status
   })
-
-  // Recent scans
-  const { data: recentScans, isLoading: scansLoading } = useQuery({
-    queryKey: ['recent-scans'],
-    queryFn: () => APIService.listScans({ limit: 5 }),
-    refetchInterval: 15000, // Refresh every 15 seconds
-  })
-
-  // Quick scan mutation
-  const quickScanMutation = useMutation({
-    mutationFn: (target: string) => APIService.createScan({
-      target,
-      mode: 'standard',
-      max_rps: 2.0,
-      phases: ['recon', 'access'],
-      enable_ai: true,
-    }),
-    onSuccess: (data) => {
-      toast.success(`Quick scan started: ${data.scan_id}`)
-      queryClient.invalidateQueries({ queryKey: ['recent-scans'] })
+  
+  // Mutations
+  const refreshMutation = useMutation({
+    mutationFn: () => api.post('/api/system/refresh'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['dashboard'] })
+      toast.success('Dashboard refreshed successfully')
     },
     onError: (error) => {
-      toast.error('Failed to start quick scan')
-    },
+      toast.error('Failed to refresh dashboard')
+      console.error('Refresh error:', error)
+    }
   })
-
-  // Update stats when WebSocket data arrives
+  
+  // Handle real-time updates from WebSocket
   useEffect(() => {
-    if (overviewStats) {
-      setStats(overviewStats)
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1]
+      
+      if (lastMessage.type === 'scan_update') {
+        // Invalidate scans query to refresh data
+        queryClient.invalidateQueries({ queryKey: ['dashboard', 'active-scans'] })
+        
+        // Show toast notification for scan updates
+        if (lastMessage.status === 'completed') {
+          toast.success(`Scan completed for ${lastMessage.target}`)
+        } else if (lastMessage.status === 'failed') {
+          toast.error(`Scan failed for ${lastMessage.target}`)
+        }
+      } else if (lastMessage.type === 'finding_discovered') {
+        // Invalidate findings query
+        queryClient.invalidateQueries({ queryKey: ['dashboard', 'recent-findings'] })
+        
+        // Show toast for new findings
+        toast.success(`New ${lastMessage.severity} finding discovered!`)
+      }
     }
-  }, [overviewStats, setStats])
-
-  // Mock data for charts (replace with real data)
-  const scanTrendData = [
-    { time: '00:00', scans: 12, findings: 45 },
-    { time: '04:00', scans: 8, findings: 32 },
-    { time: '08:00', scans: 25, findings: 89 },
-    { time: '12:00', scans: 18, findings: 67 },
-    { time: '16:00', scans: 22, findings: 78 },
-    { time: '20:00', scans: 15, findings: 54 },
+  }, [messages, queryClient])
+  
+  // Handle refresh
+  const handleRefresh = useCallback(() => {
+    refreshMutation.mutate()
+  }, [refreshMutation])
+  
+  // Toggle auto-refresh
+  const toggleAutoRefresh = useCallback(() => {
+    setAutoRefresh(prev => !prev)
+    toast.success(autoRefresh ? 'Auto-refresh disabled' : 'Auto-refresh enabled')
+  }, [autoRefresh])
+  
+  // Chart data preparation
+  const severityChartData = stats?.severity_distribution ? [
+    { name: 'Critical', value: stats.severity_distribution.critical, color: theme.palette.error.main },
+    { name: 'High', value: stats.severity_distribution.high, color: theme.palette.warning.main },
+    { name: 'Medium', value: stats.severity_distribution.medium, color: theme.palette.info.main },
+    { name: 'Low', value: stats.severity_distribution.low, color: theme.palette.success.main }
+  ] : []
+  
+  const timeSeriesData = [
+    { time: '00:00', findings: 12, scans: 3 },
+    { time: '04:00', findings: 8, scans: 2 },
+    { time: '08:00', findings: 25, scans: 5 },
+    { time: '12:00', findings: 18, scans: 4 },
+    { time: '16:00', findings: 32, scans: 6 },
+    { time: '20:00', findings: 15, scans: 3 },
+    { time: '24:00', findings: 22, scans: 4 }
   ]
-
-  const severityDistribution = [
-    { name: 'Critical', value: 15, color: '#f44336' },
-    { name: 'High', value: 28, color: '#ff9800' },
-    { name: 'Medium', value: 45, color: '#ffc107' },
-    { name: 'Low', value: 32, color: '#4caf50' },
-    { name: 'Info', value: 20, color: '#2196f3' },
-  ]
-
-  const handleQuickScan = (target: string) => {
-    if (!target.trim()) {
-      toast.error('Please enter a target URL')
-      return
-    }
-    quickScanMutation.mutate(target)
+  
+  // Loading states
+  if (statsLoading && scansLoading && findingsLoading) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Grid container spacing={3}>
+          {[...Array(8)].map((_, index) => (
+            <Grid item xs={12} md={6} lg={3} key={index}>
+              <Card>
+                <CardContent>
+                  <Skeleton variant="text" width="60%" height={24} />
+                  <Skeleton variant="text" width="40%" height={20} />
+                  <Skeleton variant="rectangular" width="100%" height={60} sx={{ mt: 1 }} />
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+      </Box>
+    )
   }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'running': return 'success'
-      case 'completed': return 'primary'
-      case 'failed': return 'error'
-      case 'pending': return 'warning'
-      default: return 'default'
-    }
-  }
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical': return 'error'
-      case 'high': return 'error'
-      case 'medium': return 'warning'
-      case 'low': return 'info'
-      default: return 'default'
-    }
-  }
-
+  
+  // Error state
   if (statsError) {
     return (
       <Box sx={{ p: 3 }}>
         <Alert severity="error" sx={{ mb: 3 }}>
           Failed to load dashboard data. Please check your connection and try again.
         </Alert>
-        <Button variant="contained" onClick={() => queryClient.invalidateQueries()}>
+        <Button variant="contained" onClick={handleRefresh} startIcon={<Refresh />}>
           Retry
         </Button>
       </Box>
     )
   }
-
+  
   return (
-    <Box sx={{ p: 3 }}>
+    <Box sx={{ p: 3, minHeight: '100vh', backgroundColor: theme.palette.background.default }}>
       {/* Header */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Dashboard
-        </Typography>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <StatusIndicator connected={connected} />
-          <Typography variant="body2" color="text.secondary">
-            {connected ? 'Connected to BAC Hunter' : 'Disconnected'}
+      <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
+        <Box>
+          <Typography variant="h4" component="h1" sx={{ fontWeight: 'bold', color: theme.palette.primary.main }}>
+            Security Dashboard
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Real-time security testing overview and insights
           </Typography>
         </Box>
+        
+        <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+          <Tooltip title={autoRefresh ? 'Disable auto-refresh' : 'Enable auto-refresh'}>
+            <IconButton 
+              onClick={toggleAutoRefresh}
+              color={autoRefresh ? 'primary' : 'default'}
+            >
+              <Refresh />
+            </IconButton>
+          </Tooltip>
+          
+          <Button
+            variant="contained"
+            startIcon={<Refresh />}
+            onClick={handleRefresh}
+            disabled={refreshMutation.isPending}
+          >
+            {refreshMutation.isPending ? 'Refreshing...' : 'Refresh Now'}
+          </Button>
+          
+          <Button
+            variant="outlined"
+            startIcon={<Add />}
+            color="primary"
+          >
+            New Scan
+          </Button>
+        </Box>
       </Box>
-
-      {/* Quick Actions */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Typography variant="h6" gutterBottom>
-            Quick Actions
-          </Typography>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={6}>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <input
-                  type="text"
-                  placeholder="Enter target URL (e.g., https://example.com)"
-                  style={{
-                    flex: 1,
-                    padding: '8px 12px',
-                    border: '1px solid #ccc',
-                    borderRadius: '4px',
-                    fontSize: '14px'
-                  }}
-                  onKeyPress={(e) => {
-                    if (e.key === 'Enter') {
-                      const target = (e.target as HTMLInputElement).value
-                      handleQuickScan(target)
-                    }
-                  }}
+      
+      {/* Main Content */}
+      <Grid container spacing={3}>
+        {/* Key Metrics Cards */}
+        <Grid item xs={12} md={6} lg={3}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3 }}
+          >
+            <Card sx={{ height: '100%', background: `linear-gradient(135deg, ${theme.palette.primary.main}15, ${theme.palette.primary.main}05)` }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <Security sx={{ fontSize: 40, color: theme.palette.primary.main, mr: 2 }} />
+                  <Box>
+                    <Typography variant="h4" component="div" sx={{ fontWeight: 'bold' }}>
+                      {stats?.total_targets || 0}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Active Targets
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <TrendingUp sx={{ fontSize: 16, color: theme.palette.success.main, mr: 1 }} />
+                  <Typography variant="caption" color="success.main">
+                    +12% from last week
+                  </Typography>
+                </Box>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </Grid>
+        
+        <Grid item xs={12} md={6} lg={3}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.1 }}
+          >
+            <Card sx={{ height: '100%', background: `linear-gradient(135deg, ${theme.palette.error.main}15, ${theme.palette.error.main}05)` }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <BugReport sx={{ fontSize: 40, color: theme.palette.error.main, mr: 2 }} />
+                  <Box>
+                    <Typography variant="h4" component="div" sx={{ fontWeight: 'bold' }}>
+                      {stats?.total_findings || 0}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Total Findings
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <TrendingDown sx={{ fontSize: 16, color: theme.palette.error.main, mr: 1 }} />
+                  <Typography variant="caption" color="error.main">
+                    -5% from last week
+                  </Typography>
+                </Box>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </Grid>
+        
+        <Grid item xs={12} md={6} lg={3}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.2 }}
+          >
+            <Card sx={{ height: '100%', background: `linear-gradient(135deg, ${theme.palette.warning.main}15, ${theme.palette.warning.main}05)` }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <Target sx={{ fontSize: 40, color: theme.palette.warning.main, mr: 2 }} />
+                  <Box>
+                    <Typography variant="h4" component="div" sx={{ fontWeight: 'bold' }}>
+                      {stats?.total_scans || 0}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Total Scans
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                  <TrendingUp sx={{ fontSize: 16, color: theme.palette.success.main, mr: 1 }} />
+                  <Typography variant="caption" color="success.main">
+                    +8% from last week
+                  </Typography>
+                </Box>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </Grid>
+        
+        <Grid item xs={12} md={6} lg={3}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.3, delay: 0.3 }}
+          >
+            <Card sx={{ height: '100%', background: `linear-gradient(135deg, ${theme.palette.info.main}15, ${theme.palette.info.main}05)` }}>
+              <CardContent>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <Timeline sx={{ fontSize: 40, color: theme.palette.info.main, mr: 2 }} />
+                  <Box>
+                    <Typography variant="h4" component="div" sx={{ fontWeight: 'bold' }}>
+                      {activeScans?.length || 0}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                      Active Scans
+                    </Typography>
+                  </Box>
+                </Box>
+                <StatusIndicator 
+                  status={systemStatus?.status || 'unknown'} 
+                  size="small"
                 />
-                <Button
-                  variant="contained"
-                  startIcon={<PlayIcon />}
-                  onClick={() => {
-                    const input = document.querySelector('input[type="text"]') as HTMLInputElement
-                    if (input) handleQuickScan(input.value)
-                  }}
-                  disabled={quickScanMutation.isPending}
-                >
-                  Quick Scan
-                </Button>
-              </Box>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant="outlined"
-                  startIcon={<RefreshIcon />}
-                  onClick={() => queryClient.invalidateQueries()}
-                >
-                  Refresh Data
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<AIIcon />}
-                  onClick={() => {/* Navigate to AI insights */}}
-                >
-                  AI Analysis
-                </Button>
-              </Box>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-
-      {/* Statistics Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    Total Scans
-                  </Typography>
-                  <Typography variant="h4">
-                    {statsLoading ? <Skeleton width={60} /> : (overviewStats?.scans_last_24h || 0)}
-                  </Typography>
-                </Box>
-                <SpeedIcon color="primary" sx={{ fontSize: 40 }} />
-              </Box>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          </motion.div>
         </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    Total Findings
-                  </Typography>
-                  <Typography variant="h4">
-                    {statsLoading ? <Skeleton width={60} /> : (overviewStats?.findings_last_24h || 0)}
-                  </Typography>
-                </Box>
-                <BugIcon color="error" sx={{ fontSize: 40 }} />
-              </Box>
-            </CardContent>
-          </Card>
+        
+        {/* Charts Row */}
+        <Grid item xs={12} lg={8}>
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4, delay: 0.4 }}
+          >
+            <Card sx={{ height: 400 }}>
+              <CardContent>
+                <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold' }}>
+                  Security Activity Timeline
+                </Typography>
+                <ResponsiveContainer width="100%" height={320}>
+                  <LineChart data={timeSeriesData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="time" />
+                    <YAxis />
+                    <RechartsTooltip />
+                    <Legend />
+                    <Line 
+                      type="monotone" 
+                      dataKey="findings" 
+                      stroke={theme.palette.error.main} 
+                      strokeWidth={2}
+                      dot={{ fill: theme.palette.error.main }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="scans" 
+                      stroke={theme.palette.primary.main} 
+                      strokeWidth={2}
+                      dot={{ fill: theme.palette.primary.main }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </motion.div>
         </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography color="text.secondary" gutterBottom>
+        
+        <Grid item xs={12} lg={4}>
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.4, delay: 0.5 }}
+          >
+            <Card sx={{ height: 400 }}>
+              <CardContent>
+                <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold' }}>
+                  Findings by Severity
+                </Typography>
+                <ResponsiveContainer width="100%" height={320}>
+                  <PieChart>
+                    <Pie
+                      data={severityChartData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {severityChartData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <RechartsTooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </Grid>
+        
+        {/* Active Scans */}
+        {activeScans && activeScans.length > 0 && (
+          <Grid item xs={12}>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.6 }}
+            >
+              <Card>
+                <CardContent>
+                  <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold' }}>
                     Active Scans
                   </Typography>
-                  <Typography variant="h4">
-                    {statsLoading ? <Skeleton width={60} /> : (overviewStats?.scans_by_status?.running || 0)}
-                  </Typography>
-                </Box>
-                <PlayIcon color="success" sx={{ fontSize: 40 }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        <Grid item xs={12} sm={6} md={3}>
-          <Card>
-            <CardContent>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Box>
-                  <Typography color="text.secondary" gutterBottom>
-                    AI Models
-                  </Typography>
-                  <Typography variant="h4">
-                    {aiModelsLoading ? <Skeleton width={60} /> : (aiModels?.models?.length || 0)}
-                  </Typography>
-                </Box>
-                <AIIcon color="secondary" sx={{ fontSize: 40 }} />
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-
-      {/* Charts Row */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
-        {/* Scan Trends */}
-        <Grid item xs={12} md={8}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Scan Activity (Last 24 Hours)
-              </Typography>
-              <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={scanTrendData}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="time" />
-                  <YAxis />
-                  <RechartsTooltip />
-                  <Line type="monotone" dataKey="scans" stroke="#2196f3" strokeWidth={2} />
-                  <Line type="monotone" dataKey="findings" stroke="#f44336" strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* Severity Distribution */}
-        <Grid item xs={12} md={4}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Findings by Severity
-              </Typography>
-              <ResponsiveContainer width="100%" height={300}>
-                <PieChart>
-                  <Pie
-                    data={severityDistribution}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={80}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {severityDistribution.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
+                  <Grid container spacing={2}>
+                    {activeScans.map((scan: ActiveScan) => (
+                      <Grid item xs={12} md={6} lg={4} key={scan.id}>
+                        <ScanProgressCard scan={scan} />
+                      </Grid>
                     ))}
-                  </Pie>
-                  <RechartsTooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
+                  </Grid>
+                </CardContent>
+              </Card>
+            </motion.div>
+          </Grid>
+        )}
+        
+        {/* Recent Findings and Quick Actions */}
+        <Grid item xs={12} lg={8}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.7 }}
+          >
+            <Card>
+              <CardContent>
+                <Typography variant="h6" sx={{ mb: 2, fontWeight: 'bold' }}>
+                  Recent Findings
+                </Typography>
+                <RecentFindingsTable findings={recentFindings || []} />
+              </CardContent>
+            </Card>
+          </motion.div>
+        </Grid>
+        
+        <Grid item xs={12} lg={4}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.8 }}
+          >
+            <QuickActionsPanel />
+          </motion.div>
+        </Grid>
+        
+        {/* System Health and AI Insights */}
+        <Grid item xs={12} md={6}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.9 }}
+          >
+            <SystemHealthCard status={systemStatus} />
+          </motion.div>
+        </Grid>
+        
+        <Grid item xs={12} md={6}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 1.0 }}
+          >
+            <AIInsightsCard />
+          </motion.div>
         </Grid>
       </Grid>
-
-      {/* Recent Activity */}
-      <Grid container spacing={3}>
-        {/* Recent Scans */}
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Recent Scans
-              </Typography>
-              {scansLoading ? (
-                <Box>
-                  {[1, 2, 3].map((i) => (
-                    <Box key={i} sx={{ mb: 2 }}>
-                      <Skeleton height={20} />
-                      <Skeleton height={16} width="60%" />
-                    </Box>
-                  ))}
-                </Box>
-              ) : (
-                <Box>
-                  {recentScans?.scans?.slice(0, 5).map((scan: any) => (
-                    <Box key={scan.id} sx={{ mb: 2, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
-                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
-                        <Typography variant="subtitle2" noWrap>
-                          {scan.name}
-                        </Typography>
-                        <Chip
-                          label={scan.status}
-                          color={getStatusColor(scan.status) as any}
-                          size="small"
-                        />
-                      </Box>
-                      <Typography variant="body2" color="text.secondary" gutterBottom>
-                        {scan.target_id} • {scan.mode} mode
-                      </Typography>
-                      {scan.status === 'running' && (
-                        <LinearProgress
-                          variant="determinate"
-                          value={scan.progress * 100}
-                          sx={{ mt: 1 }}
-                        />
-                      )}
-                    </Box>
-                  ))}
-                </Box>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* AI Insights */}
-        <Grid item xs={12} md={6}>
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                AI Insights
-              </Typography>
-              <Box>
-                <Alert severity="info" sx={{ mb: 2 }}>
-                  <Typography variant="body2">
-                    <strong>Pattern Detected:</strong> Multiple endpoints with similar response patterns detected.
-                  </Typography>
-                </Alert>
-                <Alert severity="warning" sx={{ mb: 2 }}>
-                  <Typography variant="body2">
-                    <strong>Anomaly:</strong> Unusual response times detected in authentication endpoints.
-                  </Typography>
-                </Alert>
-                <Alert severity="success">
-                  <Typography variant="body2">
-                    <strong>Recommendation:</strong> Consider enabling advanced evasion techniques for stealth scanning.
-                  </Typography>
-                </Alert>
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
+      
+      {/* Footer */}
+      <Box sx={{ mt: 4, pt: 3, borderTop: `1px solid ${theme.palette.divider}` }}>
+        <Typography variant="body2" color="text.secondary" align="center">
+          Last updated: {new Date().toLocaleString()} | 
+          Auto-refresh: {autoRefresh ? 'Enabled' : 'Disabled'} | 
+          System Status: {systemStatus?.status || 'Unknown'}
+        </Typography>
+      </Box>
     </Box>
   )
 }

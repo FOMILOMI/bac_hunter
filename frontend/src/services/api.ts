@@ -1,159 +1,96 @@
-import axios, { AxiosInstance, AxiosResponse } from 'axios'
+import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError } from 'axios'
 import { toast } from 'react-hot-toast'
 
-// API Types
+// Types
 export interface ScanRequest {
   target: string
-  mode: string
-  max_rps: number
-  phases: string[]
+  mode?: string
+  max_rps?: number
+  phases?: string[]
   identities_config?: Record<string, any>
   custom_plugins?: string[]
-  timeout_seconds?: number
-  max_concurrency?: number
+  timeout_minutes?: number
   obey_robots?: boolean
   enable_ai?: boolean
 }
 
-export interface Target {
-  id: number
+export interface TargetRequest {
   base_url: string
   name?: string
   description?: string
-  status: string
   tags?: string[]
   metadata?: Record<string, any>
-  created_at: string
-  updated_at: string
 }
 
-export interface Scan {
-  id: number
-  target_id: number
-  name: string
-  mode: string
-  status: string
-  progress: number
-  started_at?: string
-  completed_at?: string
-  configuration: Record<string, any>
-  results_summary?: Record<string, any>
-  error_message?: string
-  created_at: string
-  updated_at: string
-  user_id?: string
-}
-
-export interface Finding {
-  id: number
-  target_id: number
-  scan_id?: number
-  type: string
-  url: string
-  evidence: string
-  score: number
-  severity: string
-  status: string
-  created_at: string
-  updated_at: string
-  metadata?: Record<string, any>
-  false_positive: boolean
-  notes?: string
-}
-
-export interface Identity {
-  id: number
+export interface IdentityRequest {
   name: string
   base_headers?: Record<string, string>
-  cookies?: string
+  cookie?: string
   auth_bearer?: string
   role?: string
   user_id?: string
   tenant_id?: string
-  is_active: boolean
-  created_at: string
-  updated_at: string
 }
 
-export interface Project {
-  id: number
-  name: string
-  description?: string
-  targets?: number[]
-  configuration?: Record<string, any>
-  created_at: string
-  updated_at: string
-  status: string
-}
-
-export interface Report {
-  id: number
-  name: string
-  type: string
-  content: string
-  generated_at: string
-  scan_id?: number
-  target_id?: number
-  user_id?: string
-  metadata?: Record<string, any>
-}
-
-export interface AIModel {
-  name: string
-  status: string
-  version: string
+export interface FindingUpdateRequest {
+  status?: string
+  false_positive?: boolean
+  notes?: string
+  severity?: string
 }
 
 export interface AIAnalysisRequest {
-  target_id: number
-  analysis_type: string
-  scan_id?: number
-  custom_prompt?: string
+  target_url: string
+  context?: Record<string, any>
+  analysis_type?: string
 }
 
-export interface ScanLog {
-  id: number
-  scan_id: number
-  level: string
-  message: string
-  timestamp: string
-  metadata?: Record<string, any>
+// API Response types
+export interface ApiResponse<T = any> {
+  data: T
+  message?: string
+  status: string
 }
 
-export interface PaginatedResponse<T> {
+export interface PaginatedResponse<T = any> {
   data: T[]
   total: number
+  page: number
   limit: number
-  offset: number
+  total_pages: number
 }
 
-export interface APIResponse<T = any> {
-  success: boolean
-  data?: T
-  message?: string
-  error?: string
+// Error types
+export interface ApiError {
+  message: string
+  status: number
+  details?: any
 }
 
-// API Configuration
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'
-
-// Create axios instance
-const api: AxiosInstance = axios.create({
-  baseURL: API_BASE_URL,
+// Configuration
+const API_CONFIG = {
+  baseURL: process.env.REACT_APP_API_BASE_URL || 'http://localhost:8000',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
-})
+}
+
+// Create axios instance
+const axiosInstance: AxiosInstance = axios.create(API_CONFIG)
 
 // Request interceptor for authentication
-api.interceptors.request.use(
+axiosInstance.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('api_token')
+    // Add authentication token if available
+    const token = localStorage.getItem('auth_token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    
+    // Add request ID for tracking
+    config.headers['X-Request-ID'] = generateRequestId()
+    
     return config
   },
   (error) => {
@@ -162,388 +99,414 @@ api.interceptors.request.use(
 )
 
 // Response interceptor for error handling
-api.interceptors.response.use(
+axiosInstance.interceptors.response.use(
   (response: AxiosResponse) => {
     return response
   },
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('api_token')
-      window.location.href = '/login'
+  (error: AxiosError) => {
+    if (error.response) {
+      // Server responded with error status
+      const { status, data } = error.response
+      
+      switch (status) {
+        case 401:
+          // Unauthorized - redirect to login
+          handleUnauthorized()
+          break
+        case 403:
+          // Forbidden
+          toast.error('Access denied. You do not have permission to perform this action.')
+          break
+        case 404:
+          // Not found
+          toast.error('The requested resource was not found.')
+          break
+        case 429:
+          // Rate limited
+          toast.error('Too many requests. Please wait before trying again.')
+          break
+        case 500:
+          // Internal server error
+          toast.error('An internal server error occurred. Please try again later.')
+          break
+        default:
+          // Other errors
+          const errorMessage = data?.detail || data?.message || 'An error occurred'
+          toast.error(errorMessage)
+      }
+    } else if (error.request) {
+      // Network error
+      toast.error('Network error. Please check your connection and try again.')
+    } else {
+      // Other error
+      toast.error('An unexpected error occurred.')
     }
-    
-    const message = error.response?.data?.detail || error.message || 'An error occurred'
-    toast.error(message)
     
     return Promise.reject(error)
   }
 )
 
-// API Service Class
-export class APIService {
-  // Health Check
-  static async healthCheck(): Promise<any> {
-    const response = await api.get('/health')
+// Utility functions
+function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+function handleUnauthorized(): void {
+  // Clear stored authentication
+  localStorage.removeItem('auth_token')
+  localStorage.removeItem('user_info')
+  
+  // Redirect to login page
+  window.location.href = '/login'
+}
+
+// API class
+class APIService {
+  private client: AxiosInstance
+
+  constructor() {
+    this.client = axiosInstance
+  }
+
+  // Generic request methods
+  async get<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.client.get<T>(url, config)
     return response.data
+  }
+
+  async post<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.client.post<T>(url, data, config)
+    return response.data
+  }
+
+  async put<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.client.put<T>(url, data, config)
+    return response.data
+  }
+
+  async delete<T = any>(url: string, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.client.delete<T>(url, config)
+    return response.data
+  }
+
+  async patch<T = any>(url: string, data?: any, config?: AxiosRequestConfig): Promise<T> {
+    const response = await this.client.patch<T>(url, data, config)
+    return response.data
+  }
+
+  // Authentication
+  async login(credentials: { username: string; password: string }): Promise<{ token: string; user: any }> {
+    const response = await this.post<{ token: string; user: any }>('/api/auth/login', credentials)
+    
+    // Store authentication data
+    localStorage.setItem('auth_token', response.token)
+    localStorage.setItem('user_info', JSON.stringify(response.user))
+    
+    return response
+  }
+
+  async logout(): Promise<void> {
+    try {
+      await this.post('/api/auth/logout')
+    } catch (error) {
+      // Continue with logout even if API call fails
+      console.warn('Logout API call failed:', error)
+    } finally {
+      // Clear stored authentication
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('user_info')
+    }
+  }
+
+  async refreshToken(): Promise<{ token: string }> {
+    const response = await this.post<{ token: string }>('/api/auth/refresh')
+    
+    // Update stored token
+    localStorage.setItem('auth_token', response.token)
+    
+    return response
+  }
+
+  // Dashboard & Statistics
+  async getOverviewStats(): Promise<any> {
+    return this.get('/api/stats/overview')
+  }
+
+  async getSystemStatus(): Promise<any> {
+    return this.get('/api/system/status')
   }
 
   // Target Management
-  static async listTargets(params?: {
+  async getTargets(params?: {
+    status?: string
+    tags?: string[]
+    risk_score_min?: number
     limit?: number
     offset?: number
-    status?: string
-    search?: string
-  }): Promise<PaginatedResponse<Target>> {
-    const response = await api.get('/api/targets', { params })
-    return response.data
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams()
+    
+    if (params?.status) queryParams.append('status', params.status)
+    if (params?.tags) params.tags.forEach(tag => queryParams.append('tags', tag))
+    if (params?.risk_score_min !== undefined) queryParams.append('risk_score_min', params.risk_score_min.toString())
+    if (params?.limit) queryParams.append('limit', params.limit.toString())
+    if (params?.offset) queryParams.append('offset', params.offset.toString())
+    
+    const url = `/api/targets${queryParams.toString() ? `?${queryParams.toString()}` : ''}`
+    return this.get(url)
   }
 
-  static async createTarget(target: Omit<Target, 'id' | 'created_at' | 'updated_at'>): Promise<{ id: number; message: string }> {
-    const response = await api.post('/api/targets', target)
-    return response.data
+  async createTarget(target: TargetRequest): Promise<any> {
+    return this.post('/api/targets', target)
   }
 
-  static async getTarget(targetId: number): Promise<Target> {
-    const response = await api.get(`/api/targets/${targetId}`)
-    return response.data
+  async updateTarget(targetId: number, target: Partial<TargetRequest>): Promise<any> {
+    return this.put(`/api/targets/${targetId}`, target)
   }
 
-  static async updateTarget(targetId: number, target: Partial<Target>): Promise<{ message: string }> {
-    const response = await api.put(`/api/targets/${targetId}`, target)
-    return response.data
-  }
-
-  static async deleteTarget(targetId: number): Promise<{ message: string }> {
-    const response = await api.delete(`/api/targets/${targetId}`)
-    return response.data
+  async deleteTarget(targetId: number): Promise<any> {
+    return this.delete(`/api/targets/${targetId}`)
   }
 
   // Scan Management
-  static async listScans(params?: {
-    limit?: number
-    offset?: number
+  async getScans(params?: {
     status?: string
     target_id?: number
-  }): Promise<PaginatedResponse<Scan>> {
-    const response = await api.get('/api/scans', { params })
-    return response.data
-  }
-
-  static async createScan(scan: ScanRequest): Promise<{ scan_id: number; message: string; status: string }> {
-    const response = await api.post('/api/scans', scan)
-    return response.data
-  }
-
-  static async getScan(scanId: number): Promise<Scan> {
-    const response = await api.get(`/api/scans/${scanId}`)
-    return response.data
-  }
-
-  static async startScan(scanId: number): Promise<{ message: string }> {
-    const response = await api.post(`/api/scans/${scanId}/start`)
-    return response.data
-  }
-
-  static async stopScan(scanId: number): Promise<{ message: string }> {
-    const response = await api.post(`/api/scans/${scanId}/stop`)
-    return response.data
-  }
-
-  static async getScanProgress(scanId: number): Promise<{ scan_id: number; progress: number; status: string }> {
-    const response = await api.get(`/api/scans/${scanId}/progress`)
-    return response.data
-  }
-
-  static async getScanLogs(scanId: number, params?: {
-    level?: string
+    created_by?: string
     limit?: number
-  }): Promise<{ logs: ScanLog[] }> {
-    const response = await api.get(`/api/scans/${scanId}/logs`, { params })
-    return response.data
+    offset?: number
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams()
+    
+    if (params?.status) queryParams.append('status', params.status)
+    if (params?.target_id) queryParams.append('target_id', params.target_id.toString())
+    if (params?.created_by) queryParams.append('created_by', params.created_by)
+    if (params?.limit) queryParams.append('limit', params.limit.toString())
+    if (params?.offset) queryParams.append('offset', params.offset.toString())
+    
+    const url = `/api/scans${queryParams.toString() ? `?${queryParams.toString()}` : ''}`
+    return this.get(url)
+  }
+
+  async getScan(scanId: string): Promise<any> {
+    return this.get(`/api/scans/${scanId}`)
+  }
+
+  async createScan(scan: ScanRequest): Promise<any> {
+    return this.post('/api/scans', scan)
+  }
+
+  async pauseScan(scanId: string): Promise<any> {
+    return this.post(`/api/scans/${scanId}/pause`)
+  }
+
+  async resumeScan(scanId: string): Promise<any> {
+    return this.post(`/api/scans/${scanId}/resume`)
+  }
+
+  async deleteScan(scanId: string): Promise<any> {
+    return this.delete(`/api/scans/${scanId}`)
+  }
+
+  async getScanProgress(scanId: string): Promise<any> {
+    return this.get(`/api/scans/${scanId}/progress`)
+  }
+
+  async getScanLogs(scanId: string): Promise<any[]> {
+    return this.get(`/api/scans/${scanId}/logs`)
   }
 
   // Findings Management
-  static async listFindings(params?: {
-    limit?: number
-    offset?: number
+  async getFindings(params?: {
+    target_id?: number
     severity?: string
     status?: string
-    target_id?: number
-    scan_id?: number
-  }): Promise<PaginatedResponse<Finding>> {
-    const response = await api.get('/api/findings', { params })
-    return response.data
-  }
-
-  static async getFinding(findingId: number): Promise<Finding> {
-    const response = await api.get(`/api/findings/${findingId}`)
-    return response.data
-  }
-
-  static async updateFinding(findingId: number, finding: Partial<Finding>): Promise<{ message: string }> {
-    const response = await api.put(`/api/findings/${findingId}`, finding)
-    return response.data
-  }
-
-  // Identity Management
-  static async listIdentities(): Promise<Identity[]> {
-    const response = await api.get('/api/identities')
-    return response.data
-  }
-
-  static async createIdentity(identity: Omit<Identity, 'id' | 'created_at' | 'updated_at'>): Promise<{ id: number; message: string }> {
-    const response = await api.post('/api/identities', identity)
-    return response.data
-  }
-
-  static async updateIdentity(identityId: number, identity: Partial<Identity>): Promise<{ message: string }> {
-    const response = await api.put(`/api/identities/${identityId}`, identity)
-    return response.data
-  }
-
-  static async deleteIdentity(identityId: number): Promise<{ message: string }> {
-    const response = await api.delete(`/api/identities/${identityId}`)
-    return response.data
-  }
-
-  // Project Management
-  static async listProjects(): Promise<Project[]> {
-    const response = await api.get('/api/projects')
-    return response.data
-  }
-
-  static async createProject(project: Omit<Project, 'id' | 'created_at' | 'updated_at'>): Promise<{ id: number; message: string }> {
-    const response = await api.post('/api/projects', project)
-    return response.data
-  }
-
-  static async getProject(projectId: number): Promise<Project> {
-    const response = await api.get(`/api/projects/${projectId}`)
-    return response.data
-  }
-
-  static async updateProject(projectId: number, project: Partial<Project>): Promise<{ message: string }> {
-    const response = await api.put(`/api/projects/${projectId}`, project)
-    return response.data
-  }
-
-  static async deleteProject(projectId: number): Promise<{ message: string }> {
-    const response = await api.delete(`/api/projects/${projectId}`)
-    return response.data
-  }
-
-  // Report Management
-  static async listReports(params?: {
+    scan_id?: string
     limit?: number
     offset?: number
-    type?: string
-  }): Promise<PaginatedResponse<Report>> {
-    const response = await api.get('/api/reports', { params })
-    return response.data
+  }): Promise<any[]> {
+    const queryParams = new URLSearchParams()
+    
+    if (params?.target_id) queryParams.append('target_id', params.target_id.toString())
+    if (params?.severity) queryParams.append('severity', params.severity)
+    if (params?.status) queryParams.append('status', params.status)
+    if (params?.scan_id) queryParams.append('scan_id', params.scan_id)
+    if (params?.limit) queryParams.append('limit', params.limit.toString())
+    if (params?.offset) queryParams.append('offset', params.offset.toString())
+    
+    const url = `/api/findings${queryParams.toString() ? `?${queryParams.toString()}` : ''}`
+    return this.get(url)
   }
 
-  static async generateReport(report: Omit<Report, 'id' | 'generated_at'>): Promise<{ report_id: string; message: string; status: string }> {
-    const response = await api.post('/api/reports/generate', report)
-    return response.data
+  async getFinding(findingId: number): Promise<any> {
+    return this.get(`/api/findings/${findingId}`)
   }
 
-  static async downloadReport(reportId: string): Promise<Blob> {
-    const response = await api.get(`/api/reports/${reportId}`, {
-      responseType: 'blob'
-    })
-    return response.data
+  async updateFinding(findingId: number, update: FindingUpdateRequest): Promise<any> {
+    return this.put(`/api/findings/${findingId}`, update)
   }
 
-  // AI and Intelligence
-  static async listAIModels(): Promise<{ models: AIModel[] }> {
-    const response = await api.get('/api/ai/models')
-    return response.data
+  async exportFindings(format: string, targetId?: number): Promise<any> {
+    const params = new URLSearchParams({ format })
+    if (targetId) params.append('target_id', targetId.toString())
+    
+    return this.post(`/api/findings/export?${params.toString()}`)
   }
 
-  static async triggerAIAnalysis(request: AIAnalysisRequest): Promise<{ analysis_id: string; message: string; status: string }> {
-    const response = await api.post('/api/ai/analyze', request)
-    return response.data
+  // Identity & Session Management
+  async getIdentities(): Promise<any[]> {
+    return this.get('/api/identities')
   }
 
-  static async getAIPredictions(params?: {
-    target_id?: number
-    model_name?: string
-    limit?: number
-  }): Promise<{ predictions: any[]; total: number }> {
-    const response = await api.get('/api/ai/predictions', { params })
-    return response.data
+  async createIdentity(identity: IdentityRequest): Promise<any> {
+    return this.post('/api/identities', identity)
   }
 
-  // CLI Integration
-  static async cliScan(scanRequest: ScanRequest): Promise<{ message: string; scan_id: string; status: string }> {
-    const response = await api.post('/api/cli/scan', scanRequest)
-    return response.data
+  async getSessions(targetId?: number): Promise<any[]> {
+    const url = targetId ? `/api/sessions?target_id=${targetId}` : '/api/sessions'
+    return this.get(url)
   }
 
-  static async cliAudit(target: string, mode: string = 'standard'): Promise<{ message: string; audit_id: string; status: string }> {
-    const response = await api.post('/api/cli/audit', { target, mode })
-    return response.data
+  async refreshSessions(targetId?: number): Promise<any> {
+    const data = targetId ? { target_id: targetId } : {}
+    return this.post('/api/sessions/refresh', data)
   }
 
-  static async cliExploit(target: string, vulnerabilities: string[]): Promise<{ message: string; exploit_id: string; status: string }> {
-    const response = await api.post('/api/cli/exploit', { target, vulnerabilities })
-    return response.data
+  // AI & Intelligence
+  async getAIModels(): Promise<any> {
+    return this.get('/api/ai/models')
   }
 
-  // Statistics
-  static async getOverviewStats(): Promise<any> {
-    const response = await api.get('/api/stats/overview')
-    return response.data
+  async triggerAIAnalysis(request: AIAnalysisRequest): Promise<any> {
+    return this.post('/api/ai/analyze', request)
   }
 
-  static async getTargetStats(): Promise<{ targets: any[]; total: number }> {
-    const response = await api.get('/api/stats/targets')
-    return response.data
+  async getAIPredictions(targetUrl?: string, limit?: number): Promise<any[]> {
+    const params = new URLSearchParams()
+    if (targetUrl) params.append('target_url', targetUrl)
+    if (limit) params.append('limit', limit.toString())
+    
+    const url = `/api/ai/predictions${params.toString() ? `?${params.toString()}` : ''}`
+    return this.get(url)
   }
 
-  static async getFindingStats(): Promise<{ findings: any[]; total: number }> {
-    const response = await api.get('/api/stats/findings')
-    return response.data
+  // Plugin Management
+  async getPlugins(): Promise<any[]> {
+    return this.get('/api/plugins')
   }
 
-  // Session Management
-  static async listSessions(): Promise<any[]> {
-    const response = await api.get('/api/sessions')
-    return response.data
+  async configurePlugin(pluginName: string, config: Record<string, any>): Promise<any> {
+    return this.post(`/api/plugins/${pluginName}/config`, config)
   }
 
-  static async createSession(session: any): Promise<{ id: number; message: string }> {
-    const response = await api.post('/api/sessions', session)
-    return response.data
+  // Reporting
+  async getReports(): Promise<any[]> {
+    return this.get('/api/reports')
   }
 
-  static async getSession(sessionId: number): Promise<any> {
-    const response = await api.get(`/api/sessions/${sessionId}`)
-    return response.data
+  async generateReport(scanId: string, format?: string, template?: string): Promise<any> {
+    const data: any = { scan_id: scanId }
+    if (format) data.format = format
+    if (template) data.template = template
+    
+    return this.post('/api/reports/generate', data)
   }
 
-  static async deleteSession(sessionId: number): Promise<{ message: string }> {
-    const response = await api.delete(`/api/sessions/${sessionId}`)
-    return response.data
+  async downloadReport(reportId: string): Promise<any> {
+    return this.get(`/api/reports/${reportId}`)
   }
 
   // File Upload
-  static async uploadFile(file: File, type: string): Promise<{ message: string; file_id: string }> {
+  async uploadFile(file: File, type: string): Promise<any> {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('type', type)
     
-    const response = await api.post('/api/upload/file', formData, {
+    return this.post('/api/upload/file', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     })
-    return response.data
   }
 
-  static async uploadMultipleFiles(files: File[], type: string): Promise<{ message: string; file_ids: string[] }> {
+  async uploadMultipleFiles(files: File[], type: string): Promise<any> {
     const formData = new FormData()
     files.forEach((file, index) => {
-      formData.append(`files`, file)
+      formData.append(`files[${index}]`, file)
     })
     formData.append('type', type)
     
-    const response = await api.post('/api/upload/multiple', formData, {
+    return this.post('/api/upload/multiple', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
       },
     })
-    return response.data
   }
 
-  // Export
-  static async exportData(format: string, filters?: Record<string, any>): Promise<Blob> {
-    const response = await api.get(`/api/export`, {
-      params: { format, ...filters },
-      responseType: 'blob'
-    })
-    return response.data
+  // System Operations
+  async refreshSystem(): Promise<any> {
+    return this.post('/api/system/refresh')
   }
-}
 
-// WebSocket Service
-export class WebSocketService {
-  private ws: WebSocket | null = null
-  private reconnectAttempts = 0
-  private maxReconnectAttempts = 5
-  private reconnectDelay = 1000
+  async getHealthCheck(): Promise<any> {
+    return this.get('/health')
+  }
 
-  constructor(private url: string, private onMessage?: (data: any) => void) {}
+  // CLI Integration (for backward compatibility)
+  async executeCLICommand(command: string, args: string[]): Promise<any> {
+    return this.post('/api/cli/execute', { command, args })
+  }
 
-  connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      try {
-        this.ws = new WebSocket(this.url)
-        
-        this.ws.onopen = () => {
-          console.log('WebSocket connected')
-          this.reconnectAttempts = 0
-          resolve()
-        }
-        
-        this.ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data)
-            if (this.onMessage) {
-              this.onMessage(data)
-            }
-          } catch (error) {
-            console.error('Failed to parse WebSocket message:', error)
-          }
-        }
-        
-        this.ws.onclose = () => {
-          console.log('WebSocket disconnected')
-          this.attemptReconnect()
-        }
-        
-        this.ws.onerror = (error) => {
-          console.error('WebSocket error:', error)
-          reject(error)
-        }
-      } catch (error) {
-        reject(error)
+  // WebSocket connection helper
+  getWebSocketUrl(endpoint: string): string {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.host
+    return `${protocol}//${host}${endpoint}`
+  }
+
+  // Utility methods
+  isAuthenticated(): boolean {
+    return !!localStorage.getItem('auth_token')
+  }
+
+  getAuthToken(): string | null {
+    return localStorage.getItem('auth_token')
+  }
+
+  getUserInfo(): any | null {
+    const userInfo = localStorage.getItem('user_info')
+    return userInfo ? JSON.parse(userInfo) : null
+  }
+
+  // Error handling utilities
+  handleError(error: any): ApiError {
+    if (axios.isAxiosError(error)) {
+      return {
+        message: error.response?.data?.detail || error.response?.data?.message || error.message,
+        status: error.response?.status || 0,
+        details: error.response?.data
       }
-    })
-  }
-
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++
-      console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
-      
-      setTimeout(() => {
-        this.connect().catch(console.error)
-      }, this.reconnectDelay * this.reconnectAttempts)
-    } else {
-      console.error('Max reconnection attempts reached')
     }
-  }
-
-  disconnect(): void {
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-    }
-  }
-
-  send(data: any): void {
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(data))
+    
+    return {
+      message: error.message || 'An unknown error occurred',
+      status: 0,
+      details: error
     }
   }
 }
 
-// Create WebSocket instances
-export const scanWebSocket = (scanId: number) => 
-  new WebSocketService(`${WS_BASE_URL}/ws/scans/${scanId}`)
+// Create and export singleton instance
+export const api = new APIService()
 
-export const systemWebSocket = () => 
-  new WebSocketService(`${WS_BASE_URL}/ws/system`)
-
-export default APIService
+// Export types for use in components
+export type {
+  ScanRequest,
+  TargetRequest,
+  IdentityRequest,
+  FindingUpdateRequest,
+  AIAnalysisRequest,
+  ApiResponse,
+  PaginatedResponse,
+  ApiError
+}
