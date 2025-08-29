@@ -3,16 +3,18 @@ import {
   Card,
   CardContent,
   CardHeader,
+  Typography,
+  Box,
+  Chip,
+} from '@mui/material'
+import {
   Timeline,
   TimelineItem,
   TimelineSeparator,
   TimelineConnector,
   TimelineContent,
   TimelineDot,
-  Typography,
-  Box,
-  Chip,
-} from '@mui/material'
+} from '@mui/lab'
 import {
   PlayArrow as ScanIcon,
   BugReport as FindingIcon,

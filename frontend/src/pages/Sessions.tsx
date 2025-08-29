@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from 'react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box,
   Typography,
@@ -66,6 +66,7 @@ import {
   Timeline as TimelineIcon,
   Speed as SpeedIcon,
   CheckCircle as SuccessIcon,
+  CheckCircle,
   Warning as WarningIcon,
   Error as ErrorIcon,
   Info as InfoIcon,
@@ -82,7 +83,7 @@ import {
   Stop as StopIcon,
   Pause as PauseIcon,
   Replay as ReplayIcon,
-  Timeline as TimelineIcon,
+  Timeline as TimelineIcon2,
   AccountTree as TreeIcon,
   NetworkCheck as NetworkIcon,
   Http as HttpIcon,
@@ -102,6 +103,7 @@ import SessionDetails from '../components/sessions/SessionDetails'
 import SessionTimeline from '../components/sessions/SessionTimeline'
 import SessionExport from '../components/sessions/SessionExport'
 import SessionVisualizer from '../components/sessions/SessionVisualizer'
+import SessionGrid from '../components/sessions/SessionGrid'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -249,6 +251,15 @@ const Sessions: React.FC = () => {
     setTabValue(newValue)
   }
 
+  // Wrapper functions to convert Session objects to IDs
+  const handleDeleteSessionWrapper = (session: Session) => {
+    handleDeleteSession(session.id)
+  }
+
+  const handleReplaySessionWrapper = (session: Session) => {
+    handleReplaySession(session.id)
+  }
+
   const toggleAutoRefresh = () => {
     setAutoRefresh(!autoRefresh)
     if (!autoRefresh) {
@@ -342,15 +353,18 @@ const Sessions: React.FC = () => {
             </Grid>
             <Grid item xs={12} md={6}>
               <SessionFilters
+                searchTerm={searchTerm}
+                onSearchChange={setSearchTerm}
                 statusFilter={statusFilter}
-                setStatusFilter={setStatusFilter}
+                onStatusFilterChange={setStatusFilter}
                 typeFilter={typeFilter}
-                setTypeFilter={setTypeFilter}
-                projectFilter={projectFilter}
-                setProjectFilter={setProjectFilter}
-                scanFilter={scanFilter}
-                setScanFilter={setScanFilter}
-                sessions={sessions}
+                onTypeFilterChange={setTypeFilter}
+                onClearFilters={() => {
+                  setStatusFilter([])
+                  setTypeFilter([])
+                  setProjectFilter([])
+                  setSearchTerm('')
+                }}
               />
             </Grid>
           </Grid>
@@ -416,11 +430,11 @@ const Sessions: React.FC = () => {
       <TabPanel value={tabValue} index={0}>
         <SessionGrid
           sessions={filteredSessions}
-          isLoading={isLoading}
-          onDelete={handleDeleteSession}
-          onViewDetails={handleViewDetails}
-          onVisualize={handleVisualizeSession}
-          onReplay={handleReplaySession}
+          loading={isLoading}
+          onDelete={handleDeleteSessionWrapper}
+          onView={handleViewDetails}
+          onEdit={handleViewDetails}
+          onReplay={handleReplaySessionWrapper}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -437,10 +451,10 @@ const Sessions: React.FC = () => {
         <SessionGrid
           sessions={sessionsByStatus.active}
           isLoading={isLoading}
-          onDelete={handleDeleteSession}
+          onDelete={handleDeleteSessionWrapper}
           onViewDetails={handleViewDetails}
           onVisualize={handleVisualizeSession}
-          onReplay={handleReplaySession}
+          onReplay={handleReplaySessionWrapper}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -457,10 +471,10 @@ const Sessions: React.FC = () => {
         <SessionGrid
           sessions={sessionsByType.http}
           isLoading={isLoading}
-          onDelete={handleDeleteSession}
+          onDelete={handleDeleteSessionWrapper}
           onViewDetails={handleViewDetails}
           onVisualize={handleVisualizeSession}
-          onReplay={handleReplaySession}
+          onReplay={handleReplaySessionWrapper}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -477,10 +491,10 @@ const Sessions: React.FC = () => {
         <SessionGrid
           sessions={sessionsByType.https}
           isLoading={isLoading}
-          onDelete={handleDeleteSession}
+          onDelete={handleDeleteSessionWrapper}
           onViewDetails={handleViewDetails}
           onVisualize={handleVisualizeSession}
-          onReplay={handleReplaySession}
+          onReplay={handleReplaySessionWrapper}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}
@@ -497,10 +511,10 @@ const Sessions: React.FC = () => {
         <SessionGrid
           sessions={sessionsByType.api}
           isLoading={isLoading}
-          onDelete={handleDeleteSession}
+          onDelete={handleDeleteSessionWrapper}
           onViewDetails={handleViewDetails}
           onVisualize={handleVisualizeSession}
-          onReplay={handleReplaySession}
+          onReplay={handleReplaySessionWrapper}
           viewMode={viewMode}
           setViewMode={setViewMode}
           page={page}

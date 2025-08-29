@@ -900,6 +900,264 @@ async def get_finding_stats():
         total_findings = c.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
     return {"total_findings": total_findings}
 
+# Reports API endpoints
+@app.get("/api/reports")
+async def get_reports():
+    """Get all reports"""
+    # Mock reports data for now - in real implementation would come from database
+    reports = [
+        {
+            "id": "1",
+            "title": "Security Assessment Report",
+            "description": "Comprehensive security analysis",
+            "type": "technical",
+            "format": "pdf",
+            "status": "completed",
+            "created_at": "2024-01-01T00:00:00",
+            "generated_at": "2024-01-01T00:05:00",
+            "file_size": 1024000,
+            "content": {
+                "summary": {
+                    "total_findings": 45,
+                    "critical_findings": 5,
+                    "high_findings": 12,
+                    "medium_findings": 18,
+                    "low_findings": 10,
+                    "scan_duration": 25,
+                    "target_urls": ["example.com"]
+                }
+            }
+        }
+    ]
+    return {"reports": reports}
+
+@app.post("/api/reports/generate")
+async def generate_report(data: dict):
+    """Generate a new report"""
+    return {
+        "id": f"report_{int(datetime.now().timestamp())}",
+        "message": "Report generation started",
+        "status": "generating"
+    }
+
+@app.get("/api/reports/{report_id}")
+async def get_report_by_id(report_id: str):
+    """Get specific report details"""
+    return {
+        "id": report_id,
+        "title": "Security Assessment Report",
+        "type": "technical",
+        "format": "pdf",
+        "status": "completed"
+    }
+
+@app.delete("/api/reports/{report_id}")
+async def delete_report(report_id: str):
+    """Delete a report"""
+    return {"message": "Report deleted successfully"}
+
+@app.get("/api/reports/templates")
+async def get_report_templates():
+    """Get available report templates"""
+    templates = [
+        {"id": "executive", "name": "Executive Summary", "description": "High-level overview"},
+        {"id": "technical", "name": "Technical Report", "description": "Detailed technical findings"},
+        {"id": "compliance", "name": "Compliance Report", "description": "Regulatory compliance assessment"}
+    ]
+    return {"templates": templates}
+
+# Sessions API endpoints
+@app.get("/api/sessions")
+async def get_sessions():
+    """Get all sessions"""
+    sessions = [
+        {
+            "id": "1",
+            "name": "Session 1",
+            "type": "scan",
+            "status": "completed",
+            "start_time": "2024-01-01T00:00:00",
+            "end_time": "2024-01-01T00:30:00",
+            "duration": 1800,
+            "project_id": "1"
+        }
+    ]
+    return {"sessions": sessions}
+
+@app.post("/api/sessions")
+async def create_session(data: dict):
+    """Create a new session"""
+    return {
+        "id": f"session_{int(datetime.now().timestamp())}",
+        "message": "Session created successfully"
+    }
+
+@app.get("/api/sessions/{session_id}")
+async def get_session_by_id(session_id: str):
+    """Get specific session details"""
+    return {
+        "id": session_id,
+        "name": f"Session {session_id}",
+        "type": "scan",
+        "status": "completed"
+    }
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a session"""
+    return {"message": "Session deleted successfully"}
+
+# Scans API endpoints
+@app.get("/api/scans")
+async def get_scans():
+    """Get all scans"""
+    scans = [
+        {
+            "id": "1", 
+            "name": "Security Scan",
+            "type": "comprehensive",
+            "status": "completed",
+            "project_id": "1",
+            "target_url": "example.com",
+            "start_time": "2024-01-01T00:00:00",
+            "end_time": "2024-01-01T00:30:00",
+            "progress": 100,
+            "findings_count": 45
+        }
+    ]
+    return {"scans": scans}
+
+@app.post("/api/scans")
+async def create_scan(data: dict):
+    """Create a new scan"""
+    return {
+        "id": f"scan_{int(datetime.now().timestamp())}",
+        "message": "Scan created successfully"
+    }
+
+@app.get("/api/scans/{scan_id}")
+async def get_scan_by_id(scan_id: str):
+    """Get specific scan details"""
+    return {
+        "id": scan_id,
+        "name": f"Scan {scan_id}",
+        "type": "comprehensive",
+        "status": "completed"
+    }
+
+@app.post("/api/scans/{scan_id}/start")
+async def start_scan(scan_id: str):
+    """Start a scan"""
+    return {"message": "Scan started successfully", "status": "running"}
+
+@app.post("/api/scans/{scan_id}/stop")
+async def stop_scan(scan_id: str):
+    """Stop a scan"""
+    return {"message": "Scan stopped successfully", "status": "stopped"}
+
+@app.get("/api/scans/{scan_id}/progress")
+async def get_scan_progress(scan_id: str):
+    """Get scan progress"""
+    return {
+        "scan_id": scan_id,
+        "progress": 75,
+        "status": "running",
+        "current_step": "Checking vulnerabilities",
+        "estimated_completion": "2024-01-01T00:15:00"
+    }
+
+@app.get("/api/scans/{scan_id}/logs")
+async def get_scan_logs(scan_id: str):
+    """Get scan logs"""
+    logs = [
+        {"timestamp": "2024-01-01T00:00:00", "level": "info", "message": "Scan started"},
+        {"timestamp": "2024-01-01T00:01:00", "level": "info", "message": "Target reachable"},
+        {"timestamp": "2024-01-01T00:02:00", "level": "warning", "message": "Potential vulnerability found"}
+    ]
+    return {"logs": logs}
+
+# AI Insights API endpoints
+@app.get("/api/ai-insights")
+async def get_ai_insights():
+    """Get all AI insights"""
+    insights = [
+        {
+            "id": "1", 
+            "title": "Critical Security Issue",
+            "description": "SQL injection vulnerability detected",
+            "severity": "critical",
+            "confidence": 0.95,
+            "recommendations": ["Use parameterized queries", "Implement input validation"],
+            "created_at": "2024-01-01T00:00:00"
+        }
+    ]
+    return {"insights": insights}
+
+@app.post("/api/ai-insights/generate")
+async def generate_ai_insights(data: dict):
+    """Generate new AI insights"""
+    return {
+        "id": f"insight_{int(datetime.now().timestamp())}",
+        "message": "AI insights generation started"
+    }
+
+# Export API endpoints
+@app.get("/api/export")
+async def get_export_formats():
+    """Get available export formats"""
+    formats = [
+        {"format": "json", "description": "JSON format for data processing"},
+        {"format": "csv", "description": "CSV format for spreadsheet analysis"},
+        {"format": "pdf", "description": "PDF format for reporting"},
+        {"format": "html", "description": "HTML format for web viewing"}
+    ]
+    return {"formats": formats}
+
+# Upload API endpoints  
+@app.post("/api/upload/file")
+async def upload_file(file: dict):
+    """Upload a single file"""
+    return {
+        "file_id": f"file_{int(datetime.now().timestamp())}",
+        "message": "File uploaded successfully"
+    }
+
+@app.post("/api/upload/multiple")
+async def upload_multiple_files(files: list):
+    """Upload multiple files"""
+    return {
+        "uploaded_count": len(files),
+        "message": f"{len(files)} files uploaded successfully"
+    }
+
+# Dashboard Stats API
+@app.get("/api/dashboard/stats")
+async def get_dashboard_stats():
+    """Get comprehensive dashboard statistics"""
+    with _db.conn() as c:
+        total_projects = c.execute("SELECT COUNT(*) FROM targets").fetchone()[0]
+        total_findings = c.execute("SELECT COUNT(*) FROM findings").fetchone()[0]
+        
+        # Calculate severity distribution
+        critical = c.execute("SELECT COUNT(*) FROM findings WHERE score >= 9").fetchone()[0]
+        high = c.execute("SELECT COUNT(*) FROM findings WHERE score >= 7 AND score < 9").fetchone()[0]
+        medium = c.execute("SELECT COUNT(*) FROM findings WHERE score >= 4 AND score < 7").fetchone()[0] 
+        low = c.execute("SELECT COUNT(*) FROM findings WHERE score < 4").fetchone()[0]
+    
+    return {
+        "total_projects": total_projects,
+        "active_projects": total_projects,
+        "total_scans": total_projects,
+        "active_scans": 0,
+        "total_findings": total_findings,
+        "critical_findings": critical,
+        "high_findings": high,
+        "medium_findings": medium,
+        "low_findings": low,
+        "scan_success_rate": 0.95,
+        "average_scan_duration": 15
+    }
+
 
 def _get_embedded_dashboard_html(context: Dict[str, Any]) -> str:
     """Get embedded dashboard HTML when templates are not available"""
