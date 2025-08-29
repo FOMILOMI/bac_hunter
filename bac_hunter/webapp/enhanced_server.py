@@ -106,12 +106,18 @@ _connection_manager = ConnectionManager()
 # Setup templates and static files
 templates_dir = Path(__file__).parent.parent.parent / "templates"
 static_dir = Path(__file__).parent / "static"
+frontend_dist_dir = static_dir / "dist"
 
 if templates_dir.exists():
     templates = Jinja2Templates(directory=str(templates_dir))
 
+# Mount static files
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Mount React frontend build
+if frontend_dist_dir.exists():
+    app.mount("/assets", StaticFiles(directory=str(frontend_dist_dir / "assets")), name="assets")
 
 
 # Add favicon route to prevent 404 errors
@@ -126,8 +132,14 @@ async def favicon():
 
 @app.get("/")
 async def dashboard_home(request: Request):
-    """Enhanced dashboard home page"""
+    """Serve React frontend or fallback dashboard"""
     
+    # Check if React build exists
+    react_index = frontend_dist_dir / "index.html"
+    if react_index.exists():
+        return FileResponse(str(react_index))
+    
+    # Fallback to embedded dashboard
     # Get recent statistics
     recent_findings = list(_db.iter_findings(limit=10))
     total_findings = len(list(_db.iter_findings()))
@@ -149,13 +161,30 @@ async def dashboard_home(request: Request):
         "total_findings": total_findings,
         "recent_findings": recent_findings,
         "severity_distribution": severity_dist,
-        "dashboard_version": "2.0"
+        "dashboard_version": "3.0"
     }
     
     if 'templates' in globals():
         return templates.TemplateResponse("dashboard.html", context)
     else:
         return HTMLResponse(_get_embedded_dashboard_html(context))
+
+# Catch-all route for React Router
+@app.get("/{path:path}")
+async def serve_react_app(path: str):
+    """Serve React app for client-side routing"""
+    
+    # Check if it's an API route
+    if path.startswith('api/') or path.startswith('ws'):
+        raise HTTPException(status_code=404, detail="API endpoint not found")
+    
+    # Serve React index.html for all other routes
+    react_index = frontend_dist_dir / "index.html"
+    if react_index.exists():
+        return FileResponse(str(react_index))
+    
+    # Fallback
+    raise HTTPException(status_code=404, detail="Page not found")
 
 
 @app.websocket("/ws")

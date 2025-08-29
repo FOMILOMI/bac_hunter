@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BAC Hunter - Advanced Security Testing Platform</title>
+    <meta name="description" content="Professional-grade Broken Access Control security testing platform with AI-powered insights and real-time monitoring." />
+    <meta name="keywords" content="security testing, vulnerability assessment, penetration testing, broken access control, IDOR, security scanner" />
+    <meta name="author" content="BAC Hunter Team" />
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="BAC Hunter - Advanced Security Testing Platform" />
+    <meta property="og:description" content="Professional-grade security testing with AI-powered insights" />
+    <meta property="og:image" content="/og-image.png" />
+    
+    <!-- Twitter -->
+    <meta property="twitter:card" content="summary_large_image" />
+    <meta property="twitter:title" content="BAC Hunter - Advanced Security Testing Platform" />
+    <meta property="twitter:description" content="Professional-grade security testing with AI-powered insights" />
+    <meta property="twitter:image" content="/og-image.png" />
+    
+    <!-- Theme -->
+    <meta name="theme-color" content="#2c3e50" />
+    <meta name="color-scheme" content="dark light" />
+    
+    <!-- Preconnect to external domains -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    
+    <!-- Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet" />
+    
+    <!-- Prevent FOUC -->
+    <style>
+      html {
+        background-color: #1a1a1a;
+        color: #ecf0f1;
+      }
+      
+      body {
+        margin: 0;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+          'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        background-color: #1a1a1a;
+        color: #ecf0f1;
+      }
+      
+      #root {
+        min-height: 100vh;
+      }
+      
+      /* Loading spinner */
+      .loading-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: #1a1a1a;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+      }
+      
+      .loading-spinner {
+        width: 40px;
+        height: 40px;
+        border: 3px solid #2d2d2d;
+        border-top: 3px solid #3498db;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+      
+      .loading-text {
+        margin-top: 16px;
+        color: #bdc3c7;
+        font-size: 14px;
+      }
+      
+      /* Hide loading when React takes over */
+      .loaded .loading-container {
+        display: none;
+      }
+      
+      /* Accessibility improvements */
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+      
+      /* High contrast mode */
+      @media (prefers-contrast: high) {
+        :root {
+          --primary-color: #ffffff;
+          --secondary-color: #000000;
+          --background-color: #000000;
+          --text-color: #ffffff;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Loading screen -->
+      <div class="loading-container">
+        <div style="text-align: center;">
+          <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 16px;">
+            <div style="width: 48px; height: 48px; background: linear-gradient(135deg, #3498db 0%, #2c3e50 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 12px; font-size: 24px;">
+              🛡️
+            </div>
+            <div>
+              <h1 style="margin: 0; font-size: 24px; font-weight: 600; background: linear-gradient(135deg, #3498db 0%, #e74c3c 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
+                BAC Hunter
+              </h1>
+              <p style="margin: 0; font-size: 14px; color: #bdc3c7;">Advanced Security Testing Platform</p>
+            </div>
+          </div>
+          <div class="loading-spinner"></div>
+          <div class="loading-text">Loading application...</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Error boundary fallback -->
+    <script>
+      window.addEventListener('error', function(e) {
+        console.error('Application error:', e.error);
+        if (document.querySelector('.loading-container')) {
+          document.querySelector('.loading-text').textContent = 'Error loading application. Please refresh the page.';
+          document.querySelector('.loading-spinner').style.display = 'none';
+        }
+      });
+      
+      // Hide loading screen when React app is ready
+      window.addEventListener('DOMContentLoaded', function() {
+        setTimeout(function() {
+          const loadingContainer = document.querySelector('.loading-container');
+          if (loadingContainer && document.querySelector('[data-reactroot], #root > div')) {
+            loadingContainer.style.display = 'none';
+          }
+        }, 100);
+      });
+    </script>
+    
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
