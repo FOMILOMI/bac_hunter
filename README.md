@@ -1,257 +1,258 @@
-BAC Hunter is a professional-grade, AI‑enhanced framework for discovering Broken Access Control vulnerabilities. It features a modular architecture, smart rate limiting, unified orchestration, comprehensive reporting, and optional AI assistance.
+# BAC Hunter - Professional Broken Access Control Security Testing Platform
 
-### 🚀 What's New in v2.0
-- **🧙 Interactive Setup Wizard**: Guided configuration for beginners with pre-configured profiles
-- **🎓 Educational Learning Mode**: Step-by-step explanations and interactive security tutorials
-- **🤖 AI-Powered Anomaly Detection**: Machine learning for identifying unusual response patterns
-- **🔍 Intelligent Recommendations**: AI-driven suggestions for next testing steps
-- **🔐 Encrypted Secure Storage**: Protected storage for sensitive authentication data
-- **🧪 Payload Sandboxing**: Safe testing environment for exploits and payloads
-- **🌐 Enhanced Web Dashboard**: Real-time updates, advanced visualizations, and modern UI
-- **📚 Comprehensive Knowledge Base**: Built-in vulnerability explanations and best practices
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Security](https://img.shields.io/badge/security-tool-red.svg)](https://github.com/bachunter/bac-hunter)
 
-### 🔧 Critical Fixes & Improvements (Latest)
-- **✅ Infinite Loop Prevention**: Fixed critical infinite loops in rate limiting, HTTP client, and session management
-- **✅ Performance Optimization**: Reduced redundant requests by 40-60% with smart deduplication
-- **✅ Enhanced Error Handling**: Comprehensive error recovery and graceful degradation
-- **✅ Circuit Breaker Patterns**: Intelligent backoff strategies to prevent cascading failures
-- **✅ WAF Detection**: Advanced WAF detection with automatic rate limiting adjustment
-- **✅ Request Limits**: Configurable limits to prevent resource exhaustion and excessive requests
-- **✅ Session Management**: Robust session handling with timeout protection and recovery
+**BAC Hunter** is a comprehensive, AI-powered security testing platform designed to detect Broken Access Control (BAC) vulnerabilities, IDOR (Insecure Direct Object Reference) issues, and privilege escalation flaws in web applications.
 
-### Core Features
-- Stable CLI with 15+ subcommands including new educational and AI-powered tools
-- SQLite-backed storage with encrypted sensitive data protection
-- Auto-fallbacks for missing external tools (Subfinder, ProjectDiscovery httpx)
-- Advanced web dashboard with WebSocket real-time updates
-- Unified exporters (HTML/CSV/JSON/SARIF/PDF) with enhanced reporting
+## 🎯 What BAC Hunter Actually Does
 
-## 🎯 Highlights
+BAC Hunter is a **real, working security testing tool** that provides:
 
-- **Smart CLI**: `quickscan`, contextual help, runs without YAML
-- **Web Dashboard**: Real-time findings, filtering/sorting/export, trigger scans
-- **Auto-Setup Wizard**: `bac_hunter setup` to generate YAMLs with guided questions
-- **Integrated Fallback Scanning**: Works even without Nuclei/Dirsearch
-- **Intelligent Profiling**: Detect web/API/SPA and auth hints (JWT/Basic/Cookie)
-- **Unified Reporting**: HTML/CSV/JSON and PDF (if WeasyPrint installed), with recommendations
-- **Modern Deployment**: Docker support for easy, isolated runs
-- **Production Ready**: Comprehensive error handling, performance optimization, and security enhancements
+### 🔍 **Intelligent Reconnaissance**
+- **Robots.txt Analysis**: Respectful crawling with robots.txt compliance
+- **Sitemap Discovery**: XML sitemap parsing and endpoint extraction
+- **JavaScript Endpoint Mining**: Dynamic endpoint discovery from JS files
+- **Smart Endpoint Detection**: Intelligent URL pattern recognition
+- **OpenAPI/Swagger Discovery**: API endpoint and schema analysis
+- **Authentication Discovery**: Login, OAuth, and admin endpoint detection
+- **GraphQL Testing**: Comprehensive GraphQL vulnerability assessment
 
-## Overview
+### 🚪 **Access Control Testing**
+- **Differential Testing**: Compare responses between different user identities
+- **IDOR Detection**: Advanced IDOR vulnerability identification
+- **Force Browsing**: Test unauthorized access to protected resources
+- **HAR Replay Analysis**: Analyze recorded HTTP sessions
+- **Request Mutation**: Intelligent parameter manipulation
+- **Response Comparison**: Detailed response analysis for access control issues
 
-BAC Hunter helps security engineers and developers discover access control issues across web apps and APIs. It provides safe defaults, graceful error handling, and optional integrations with external tools. The architecture is organized into clear modules:
+### 🤖 **AI-Powered Intelligence**
+- **Smart Authentication Detection**: Automated login flow discovery
+- **Intelligent Identity Factory**: Dynamic account creation and management
+- **Target Profiling**: Business context and framework detection
+- **Anomaly Detection**: ML-based response pattern analysis
+- **Vulnerability Prediction**: AI-driven endpoint risk assessment
 
-- core: configuration, HTTP client, session manager, rate limiting, storage
-- scanners: recon and testing plugins (GraphQL, robots, sitemap, JS parsing, etc.)
-- utils: shared helpers
-- reporting: exporters and report builders
-- ai_assistants: optional AI analysis and prioritization
+### 🎛️ **Advanced Features**
+- **Session Management**: Persistent authentication handling
+- **Rate Limiting**: Intelligent request throttling with WAF detection
+- **Multiple Scan Modes**: Stealth, Standard, Aggressive, Maximum
+- **Real-time Dashboard**: Modern React-based web interface
+- **Comprehensive Reporting**: HTML, CSV, and JSON export formats
+- **CI/CD Integration**: Automated security testing in pipelines
 
-## Features
+## 🚀 Key Features
 
-- Smart HTTP stack with adaptive rate limiting and WAF awareness
-- Recon scanners for robots/sitemap/JS endpoints/OpenAPI/GraphQL
-- Session management with semi‑automatic login hooks
-- JSON/Markdown/HTML reporting with summaries and highlights
-- Optional AI post‑analysis for prioritization and insights
-- Clean CLI and web dashboard (optional extras)
+### ✅ **Command Line Interface**
+- **Zero-config scanning**: `bac-hunter smart-scan https://target.com`
+- **Reconnaissance**: `bac-hunter recon https://target.com`
+- **Full audit**: `bac-hunter audit https://target.com`
+- **Interactive setup**: `bac-hunter setup-wizard`
+- **Web dashboard**: `bac-hunter dashboard`
 
-## 🚀 Quick Start
+### ✅ **Web Interface**
+- **Modern React Dashboard**: Real-time scan monitoring
+- **WebSocket Updates**: Live progress and results
+- **Interactive Controls**: Start, stop, and configure scans
+- **Visual Analytics**: Charts and vulnerability summaries
+- **Responsive Design**: Works on desktop and mobile
 
-### Installation
+### ✅ **Intelligent Automation**
+- **Smart Mode Selection**: Automatically adjusts based on target response
+- **WAF Detection**: Intelligent rate limiting and evasion
+- **Business Context**: Industry-specific testing strategies
+- **Learning Mode**: Improves detection over time
 
-#### Recommended: Using Virtual Environment
+## 📋 Installation & Setup
+
+### Prerequisites
+- Python 3.8 or higher
+- Modern web browser (for dashboard)
+
+### Quick Install
 ```bash
-# Python 3.11+ required (tested on Python 3.13)
-# Create and activate virtual environment
-python3 -m venv bac_hunter_env
-source bac_hunter_env/bin/activate  # On Windows: bac_hunter_env\Scripts\activate
+# Clone the repository
+git clone https://github.com/bachunter/bac-hunter.git
+cd bac-hunter
 
-# Install dependencies
-pip install -r requirements.txt
+# Install the package
+pip install -e .
 
-# Optional (for development and tests)
-pip install -r requirements-test.txt
+# Run setup wizard
+bac-hunter setup-wizard
 ```
 
-#### Alternative: System-wide Installation
+### Development Install
 ```bash
-# If you prefer system-wide installation (not recommended for production)
-pip3 install --break-system-packages -r requirements.txt
+# Install with development dependencies
+pip install -e .[dev]
+
+# Install with AI capabilities
+pip install -e .[ai]
+
+# Install with full features
+pip install -e .[full]
 ```
 
-#### Troubleshooting Installation Issues
+## 🎮 Usage Examples
 
-**Missing python3-venv on Ubuntu/Debian:**
+### Basic Scanning
 ```bash
-sudo apt update && sudo apt install python3-venv python3-pip
+# Quick scan with default settings
+bac-hunter smart-scan https://example.com
+
+# Stealth mode for sensitive targets
+bac-hunter smart-scan https://example.com --mode stealth
+
+# Basic scan with report generation
+bac-hunter smart-scan https://example.com --basic --generate-report
 ```
 
-**Permission denied errors:**
+### Advanced Testing
 ```bash
-# Use virtual environment instead of --break-system-packages
-python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt
+# Full reconnaissance
+bac-hunter recon https://example.com
+
+# Complete audit with custom phases
+bac-hunter audit https://example.com --phases recon,access,audit
+
+# IDOR-specific testing
+bac-hunter idor-test https://example.com --identities identities.yaml
 ```
 
-**Missing dependencies errors:**
-- Ensure all dependencies in `requirements.txt` are installed
-- Key dependencies: `numpy`, `scikit-learn`, `httpx`, `typer`, `rich`
-- For AI features: `tensorflow-cpu`, `nltk`, `pandas`
-
-### 🧪 Testing
-
-After installation, run the comprehensive test suite to validate all fixes:
-
+### Web Dashboard
 ```bash
-# Run all tests
-python run_tests.py
+# Start the web interface
+bac-hunter dashboard --host 0.0.0.0 --port 8000
 
-# Or run individual test suites
-python -m pytest tests/test_rate_limiter_fixes.py -v
-python -m pytest tests/test_http_client_fixes.py -v
-python -m pytest tests/test_session_manager_fixes.py -v
+# Then visit: http://localhost:8000
 ```
 
-### 🧙 Quick Start with Setup Wizard (Recommended for Beginners)
+## 🏗️ Architecture
 
-```bash
-# Interactive setup wizard with guided configuration
-python -m bac_hunter setup-wizard
+### Core Components
+- **CLI Interface**: Typer-based command line interface
+- **Plugin System**: Modular architecture for easy extension
+- **Session Management**: Persistent authentication handling
+- **Database Layer**: SQLite-based storage with encryption
+- **HTTP Client**: Advanced HTTP client with rate limiting
+- **AI Engine**: Machine learning for vulnerability detection
 
-# Follow the generated quick-start script
-./run_scan.sh
-
-# View results in enhanced web dashboard
-python -m bac_hunter dashboard
+### Plugin Architecture
+```
+bac_hunter/
+├── plugins/           # Reconnaissance plugins
+│   ├── recon/        # Discovery modules
+│   └── enhanced_*    # Specialized testers
+├── access/           # Access control testing
+├── intelligence/     # AI and ML capabilities
+├── webapp/          # React dashboard backend
+└── utils/           # Shared utilities
 ```
 
-### 🚀 One-Click Smart Auto (Advanced Users)
+## 🔧 Configuration
 
-Run a near‑zero configuration scan that profiles, performs smart recon, gathers auth intelligence, suggests identities, and runs light access checks:
-
+### Environment Variables
 ```bash
-# Basic smart scan
-python -m bac_hunter smart-auto https://target.com
-
-# With learning mode for educational explanations
-python -m bac_hunter smart-auto --learning-mode https://target.com
-
-# Advanced configuration
-python -m bac_hunter smart-auto \
-  --mode standard \
-  --max-rps 2.0 \
-  --identities-yaml identities.yaml \
+export BAC_HUNTER_DB_PATH="/path/to/database.db"
+export BAC_HUNTER_LOG_LEVEL="INFO"
+export BAC_HUNTER_MAX_RPS="2.0"
 ```
 
-### 🔧 Configuration and Limits
+### Configuration Files
+- **identities.yaml**: User accounts and authentication data
+- **tasks.yaml**: Custom scan configurations
+- **.bac-hunter.yml**: Global settings
 
-The tool now includes configurable limits to prevent excessive requests and resource exhaustion:
+## 📊 Output & Reporting
 
+### Scan Results
+- **Real-time Updates**: Live progress via WebSocket
+- **Database Storage**: Persistent SQLite storage
+- **Export Formats**: HTML, CSV, JSON reports
+- **Risk Scoring**: Automated vulnerability prioritization
+
+### Report Types
+- **Executive Summary**: High-level risk overview
+- **Technical Details**: Comprehensive vulnerability information
+- **Remediation Guide**: Actionable security recommendations
+- **Evidence Collection**: Proof-of-concept examples
+
+## 🛡️ Security & Ethics
+
+### Responsible Disclosure
+- **Rate Limiting**: Respectful scanning with configurable limits
+- **Robots.txt Compliance**: Honors website crawling policies
+- **Error Handling**: Graceful failure without causing issues
+- **Logging**: Comprehensive audit trails for compliance
+
+### Legal Compliance
+- **Authorized Testing Only**: Use only on systems you own or have permission to test
+- **Terms of Service**: Respect website terms and conditions
+- **Data Protection**: Secure handling of sensitive information
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
 ```bash
-# Set environment variables for limits
-export BH_MAX_IDOR_VARIANTS=10
-export BH_MAX_ENDPOINT_CANDIDATES=25
-export BH_MAX_ENDPOINTS_PER_TARGET=150
+# Install development dependencies
+pip install -e .[dev]
 
-# Or modify .bac-hunter.yml
-echo "max_idor_variants: 10" >> .bac-hunter.yml
-echo "max_endpoint_candidates: 25" >> .bac-hunter.yml
+# Run tests
+pytest
+
+# Code formatting
+black bac_hunter/
+flake8 bac_hunter/
 ```
 
-### 📊 Performance
+## 📚 Documentation
 
-- **40-60% reduction** in redundant HTTP requests
-- **70% reduction** in rate limit violations
-- **90% reduction** in login-related hangs
-- **Intelligent deduplication** with context awareness
-- **Adaptive rate limiting** with WAF detection
-- **Circuit breaker patterns** for graceful degradation
+- **User Guide**: [docs/user_guides/README_ENHANCED.md](docs/user_guides/README_ENHANCED.md)
+- **Implementation Details**: [docs/implementation/](docs/implementation/)
+- **API Reference**: [docs/technical/](docs/technical/)
 
-## Architecture Notes
+## 🏆 Use Cases
 
-### Critical Issues Resolved
+### Security Researchers
+- **Vulnerability Research**: Discover new BAC patterns
+- **Tool Development**: Extend with custom plugins
+- **Methodology Testing**: Validate security approaches
 
-1. **Infinite Loops**: Fixed in rate limiter, HTTP client, and session manager
-2. **Excessive Requests**: Added configurable limits and smart deduplication
-3. **Tool Hangs**: Implemented timeout protection and circuit breakers
-4. **Error Crashes**: Added comprehensive error handling and recovery
-5. **Resource Exhaustion**: Limited endpoint discovery and IDOR testing
-6. **WAF Detection**: Enhanced evasion with intelligent rate limiting
+### Penetration Testers
+- **Web Application Testing**: Comprehensive BAC assessment
+- **Red Team Operations**: Advanced access control testing
+- **Compliance Audits**: Security standard validation
 
-### Enhanced Features
+### Development Teams
+- **Security Testing**: CI/CD integration for automated testing
+- **Code Review**: Identify access control issues early
+- **Training**: Security awareness and best practices
 
-- **Smart Deduplication**: Prevents redundant requests to same endpoints
-- **Circuit Breaker Pattern**: Intelligent backoff for repeated failures
-- **WAF Integration**: Automatic rate limiting adjustment based on threat detection
-- **Session Recovery**: Graceful handling of authentication failures
-- **Performance Monitoring**: Real-time metrics and optimization suggestions
+## 📄 License
 
-## Documentation
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-See docs/ for structured documentation:
+## ⚠️ Disclaimer
 
-- docs/overview.md: architecture and modules
-- docs/usage.md: CLI usage and examples
-- docs/development.md: contribution, style, testing
-- docs/extending.md: writing new scanners/plugins
+**BAC Hunter is a security testing tool designed for authorized security assessments only.**
 
-- **[Comprehensive Fixes Report](COMPREHENSIVE_FIXES_REPORT.md)**: Detailed technical documentation
-- **[Enhanced Features Guide](ENHANCED_FEATURES.md)**: New capabilities and improvements
-- **[Session Management](SESSION_PERSISTENCE_IMPROVEMENTS.md)**: Authentication and session handling
-- **[Authentication Improvements](AUTHENTICATION_IMPROVEMENTS_SUMMARY.md)**: Enhanced auth workflows
-
-## 🧪 Testing and Validation
-
-The tool includes a comprehensive test suite to validate all fixes:
-
-```bash
-# Run all tests
-python run_tests.py
-
-# Individual test suites
-python -m pytest tests/ -v
-
-# Performance tests
-python -m pytest tests/test_performance.py -v
-```
-
-## 🚀 Production Readiness
-
-The tool is now production-ready with:
-
-- ✅ **Stability**: All infinite loops resolved
-- ✅ **Performance**: Optimized request handling and caching
-- ✅ **Security**: Enhanced WAF detection and evasion
-- ✅ **Reliability**: Comprehensive error handling and recovery
-- ✅ **Monitoring**: Real-time metrics and performance tracking
-- ✅ **Testing**: Comprehensive test suite and validation
-
-## Contributing
-
-We welcome contributions! Please see our contributing guidelines and ensure all tests pass:
-
-```bash
-# Run tests before submitting
-python run_tests.py
-
-# Check code quality
-python -m flake8 bac_hunter/
-python -m black --check bac_hunter/
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+- Use only on systems you own or have explicit permission to test
+- Respect all applicable laws and regulations
+- Follow responsible disclosure practices
+- The authors are not responsible for misuse of this tool
 
 ## 🆘 Support
 
-For support and questions:
-
-- 📖 **Documentation**: Check the comprehensive fixes report
-- 🐛 **Issues**: Report bugs and feature requests
-- 💬 **Discussions**: Join community discussions
-- 📧 **Contact**: Reach out to the development team
+- **Issues**: [GitHub Issues](https://github.com/bachunter/bac-hunter/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/bachunter/bac-hunter/discussions)
+- **Security**: [Security Policy](SECURITY.md)
 
 ---
 
-**BAC Hunter v2.0** - Now with comprehensive fixes, performance optimization, and production-ready stability! 🚀
+**Made with ❤️ by the BAC Hunter Security Team**
+
+*Protecting the web, one access control at a time.*

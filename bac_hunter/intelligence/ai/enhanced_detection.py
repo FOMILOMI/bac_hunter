@@ -303,140 +303,53 @@ class IntelligentVulnerabilityDetector:
         
     def _calculate_url_similarity(self, url_a: str, url_b: str) -> float:
         """Calculate similarity between two URLs."""
-        # Similarity based on common path segments ignoring differing numeric IDs
-        # Compare only path component
-        try:
-            from urllib.parse import urlparse
-            pa = urlparse(url_a).path.strip('/').split('/')
-            pb = urlparse(url_b).path.strip('/').split('/')
-        except Exception:
-            pa = url_a.strip('/').split('/')
-            pb = url_b.strip('/').split('/')
-        if len(pa) != len(pb):
-            # Compare only up to min length to avoid false zeros
-            upto = min(len(pa), len(pb))
-            if upto == 0:
-                return 0.0
-            matches = sum(1 for a, b in zip(pa[:upto], pb[:upto]) if a == b or (a.isdigit() and b.isdigit()))
-            return matches / float(upto)
-        matches = sum(1 for a, b in zip(pa, pb) if a == b or (a.isdigit() and b.isdigit()))
-        return matches / float(len(pa))
+        from ..utils.similarity import calculate_url_similarity
+        return calculate_url_similarity(url_a, url_b)
         
     def _analyze_content_for_user_data(self, resp_a: Dict, resp_b: Dict) -> Dict[str, Any]:
         """Analyze response content for user-specific data patterns."""
-        content_a = resp_a.get('body', '')
-        content_b = resp_b.get('body', '')
-        
-        # Look for user-specific patterns
-        user_patterns = [
-            r'user[_-]?id["\s:]*(\w+)',
-            r'email["\s:]*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})',
-            r'name["\s:]*([A-Za-z\s]+)',
-            r'account[_-]?number["\s:]*(\w+)'
-        ]
-        
-        data_a = {}
-        data_b = {}
-        
-        for pattern in user_patterns:
-            matches_a = re.findall(pattern, content_a, re.IGNORECASE)
-            matches_b = re.findall(pattern, content_b, re.IGNORECASE)
-            
-            if matches_a:
-                data_a[pattern] = matches_a
-            if matches_b:
-                data_b[pattern] = matches_b
-                
-        # Check if data suggests different users
-        suggests_cross_access = False
-        if data_a and data_b:
-            # If we found user data in both responses and they're different
-            for pattern in user_patterns:
-                if pattern in data_a and pattern in data_b:
-                    if data_a[pattern] != data_b[pattern]:
-                        suggests_cross_access = True
-                        break
-                        
-        return {
-            'suggests_cross_access': suggests_cross_access,
-            'data_a': data_a,
-            'data_b': data_b,
-            'content_similarity': self._calculate_content_similarity(content_a, content_b)
-        }
+        from ..utils.similarity import analyze_content_for_user_data
+        return analyze_content_for_user_data(resp_a, resp_b)
         
     def _calculate_content_similarity(self, content_a: str, content_b: str) -> float:
         """Calculate similarity between response contents."""
-        if not content_a or not content_b:
-            return 0.0
-            
-        # Simple word-based similarity
-        words_a = set(content_a.lower().split())
-        words_b = set(content_b.lower().split())
-        
-        intersection = words_a & words_b
-        union = words_a | words_b
-        
-        return len(intersection) / len(union) if union else 0.0
+        from ..utils.similarity import calculate_content_similarity
+        return calculate_content_similarity(content_a, content_b)
         
     def _analyze_id_patterns(self, responses: List[Dict]) -> List[VulnerabilityFinding]:
         """Analyze ID patterns for predictability."""
+        from ..utils.similarity import analyze_id_patterns
+        
+        raw_findings = analyze_id_patterns(responses)
         findings = []
         
-        # Extract IDs from URLs and responses
-        ids = []
-        for response in responses:
-            url = response.get('url', '')
-            body = response.get('body', '')
-            
-            # Extract numeric IDs from URLs
-            url_ids = re.findall(r'/(\d+)(?:/|$|\?)', url)
-            ids.extend([int(id_str) for id_str in url_ids])
-            
-            # Extract IDs from response bodies
-            body_ids = re.findall(r'(?:id|user_id|account_id)["\':\s]*(\d+)', body)
-            ids.extend([int(id_str) for id_str in body_ids])
-            
-        if len(ids) > 2:
-            # Analyze ID patterns
-            ids.sort()
-            
-            # Check for sequential patterns
-            sequential_count = 0
-            for i in range(1, len(ids)):
-                if ids[i] - ids[i-1] == 1:
-                    sequential_count += 1
-                    
-            if sequential_count >= 5:  # strict enough for 10 sequential IDs in tests
-                finding = VulnerabilityFinding(
-                    id=self._generate_finding_id('sequential_ids', str(ids[0])),
-                    type=VulnerabilityType.IDOR,
-                    confidence=ConfidenceLevel.MEDIUM,
-                    severity="medium",
-                    title="Sequential ID Pattern Detected",
-                    description="Resource IDs follow a predictable sequential pattern",
-                    evidence=[
-                        VulnerabilityEvidence(
-                            type="sequential_pattern",
-                            description="IDs are sequential and predictable",
-                            data={
-                                "ids": ids[:10],  # First 10 IDs
-                                "sequential_percentage": sequential_count / len(ids),
-                                "total_ids": len(ids)
-                            },
-                            confidence=0.7
-                        )
-                    ],
-                    affected_urls=[r['url'] for r in responses[:5]],
-                    recommendations=[
-                        "Use unpredictable resource identifiers (UUIDs)",
-                        "Implement proper authorization checks",
-                        "Consider using resource-specific tokens",
-                        "Add rate limiting to prevent enumeration"
-                    ],
-                    cwe_id="CWE-639"
-                )
-                findings.append(finding)
-                
+        for raw_finding in raw_findings:
+            finding = VulnerabilityFinding(
+                id=self._generate_finding_id('sequential_ids', str(raw_finding['evidence']['ids'][0])),
+                type=VulnerabilityType.IDOR,
+                confidence=ConfidenceLevel.MEDIUM,
+                severity="medium",
+                title=raw_finding['title'],
+                description="Resource IDs follow a predictable sequential pattern",
+                evidence=[
+                    VulnerabilityEvidence(
+                        type="sequential_pattern",
+                        description="IDs are sequential and predictable",
+                        data=raw_finding['evidence'],
+                        confidence=0.7
+                    )
+                ],
+                affected_urls=[r['url'] for r in responses[:5]],
+                recommendations=[
+                    "Use unpredictable resource identifiers (UUIDs)",
+                    "Implement proper authorization checks",
+                    "Consider using resource-specific tokens",
+                    "Add rate limiting to prevent enumeration"
+                ],
+                cwe_id="CWE-639"
+            )
+            findings.append(finding)
+        
         return findings
         
     def _analyze_privilege_escalation(self, responses: List[Dict], context: Optional[Dict]) -> List[VulnerabilityFinding]:

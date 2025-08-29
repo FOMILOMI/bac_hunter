@@ -12,9 +12,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from fastapi.requests import Request
 from pydantic import BaseModel
 
@@ -97,6 +96,9 @@ app = FastAPI(
     version="2.0"
 )
 
+# Mount React frontend static files
+app.mount("/", StaticFiles(directory="../../frontend/dist", html=True), name="frontend")
+
 # Global instances
 _stats = StatsCollector()
 _settings = Settings()
@@ -131,43 +133,13 @@ async def favicon():
         return JSONResponse({"message": "favicon not found"}, status_code=404)
 
 @app.get("/")
-async def dashboard_home(request: Request):
-    """Serve React frontend or fallback dashboard"""
-    
-    # Check if React build exists
-    react_index = frontend_dist_dir / "index.html"
+async def dashboard_home():
+    """Serve React frontend"""
+    react_index = Path("../../frontend/dist/index.html")
     if react_index.exists():
         return FileResponse(str(react_index))
-    
-    # Fallback to embedded dashboard
-    # Get recent statistics
-    recent_findings = list(_db.iter_findings(limit=10))
-    total_findings = len(list(_db.iter_findings()))
-    
-    # Calculate severity distribution
-    severity_dist = {"critical": 0, "high": 0, "medium": 0, "low": 0}
-    for _, finding_type, _, _, score in _db.iter_findings():
-        if score >= 9:
-            severity_dist["critical"] += 1
-        elif score >= 7:
-            severity_dist["high"] += 1
-        elif score >= 4:
-            severity_dist["medium"] += 1
-        else:
-            severity_dist["low"] += 1
-    
-    context = {
-        "request": request,
-        "total_findings": total_findings,
-        "recent_findings": recent_findings,
-        "severity_distribution": severity_dist,
-        "dashboard_version": "3.0"
-    }
-    
-    if 'templates' in globals():
-        return templates.TemplateResponse("dashboard.html", context)
     else:
-        return HTMLResponse(_get_embedded_dashboard_html(context))
+        return JSONResponse({"error": "React frontend not built. Run 'npm run build' in frontend/ directory."})
 
 # Catch-all route for React Router
 @app.get("/{path:path}")
@@ -179,7 +151,7 @@ async def serve_react_app(path: str):
         raise HTTPException(status_code=404, detail="API endpoint not found")
     
     # Serve React index.html for all other routes
-    react_index = frontend_dist_dir / "index.html"
+    react_index = Path("../../frontend/dist/index.html")
     if react_index.exists():
         return FileResponse(str(react_index))
     
@@ -1159,156 +1131,4 @@ async def get_dashboard_stats():
     }
 
 
-def _get_embedded_dashboard_html(context: Dict[str, Any]) -> str:
-    """Get embedded dashboard HTML when templates are not available"""
-    
-    return f"""
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>BAC Hunter Enhanced Dashboard</title>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <style>
-            body {{ 
-                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                margin: 0; padding: 20px; background: #f5f5f5; color: #333;
-            }}
-            .container {{ max-width: 1200px; margin: 0 auto; }}
-            .header {{ background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-                      color: white; padding: 2rem; border-radius: 10px; margin-bottom: 2rem; }}
-            .stats-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); 
-                          gap: 1rem; margin-bottom: 2rem; }}
-            .stat-card {{ background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-            .stat-number {{ font-size: 2rem; font-weight: bold; color: #667eea; }}
-            .findings-table {{ background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }}
-            .findings-table table {{ width: 100%; border-collapse: collapse; }}
-            .findings-table th {{ background: #667eea; color: white; padding: 1rem; text-align: left; }}
-            .findings-table td {{ padding: 1rem; border-bottom: 1px solid #eee; }}
-            .severity-critical {{ color: #e74c3c; font-weight: bold; }}
-            .severity-high {{ color: #f39c12; font-weight: bold; }}
-            .severity-medium {{ color: #3498db; }}
-            .severity-low {{ color: #27ae60; }}
-            .chart-container {{ background: white; padding: 1.5rem; border-radius: 8px; 
-                               box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 1rem; }}
-            .btn {{ background: #667eea; color: white; border: none; padding: 0.5rem 1rem; 
-                   border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; }}
-            .btn:hover {{ background: #5a67d8; }}
-            .ws-status {{ position: fixed; top: 10px; right: 10px; padding: 0.5rem 1rem; 
-                         border-radius: 20px; font-size: 0.8rem; }}
-            .ws-connected {{ background: #27ae60; color: white; }}
-            .ws-disconnected {{ background: #e74c3c; color: white; }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🛡️ BAC Hunter Enhanced Dashboard</h1>
-                <p>Professional-grade Broken Access Control security testing platform</p>
-            </div>
-            
-            <div id="ws-status" class="ws-status ws-disconnected">Disconnected</div>
-            
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number">{context['total_findings']}</div>
-                    <div>Total Findings</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{context['severity_distribution']['critical']}</div>
-                    <div>Critical Issues</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{context['severity_distribution']['high']}</div>
-                    <div>High Priority</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-number">{len(context['recent_findings'])}</div>
-                    <div>Recent Findings</div>
-                </div>
-            </div>
-            
-            <div class="chart-container">
-                <h3>Severity Distribution</h3>
-                <canvas id="severityChart" width="400" height="200"></canvas>
-            </div>
-            
-            <div class="findings-table">
-                <h3 style="margin: 0; padding: 1rem; background: #f8f9fa;">Recent Findings</h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Type</th>
-                            <th>URL</th>
-                            <th>Severity</th>
-                            <th>Score</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {"".join([
-                            f"<tr><td>{f_type}</td><td>{url[:50]}...</td><td class='severity-{'critical' if score >= 9 else 'high' if score >= 7 else 'medium' if score >= 4 else 'low'}'>{('Critical' if score >= 9 else 'High' if score >= 7 else 'Medium' if score >= 4 else 'Low')}</td><td>{score}</td></tr>"
-                            for _, f_type, url, _, score in context['recent_findings'][:10]
-                        ])}
-                    </tbody>
-                </table>
-            </div>
-            
-            <div style="margin-top: 2rem; text-align: center;">
-                <a href="/api/v2/export/html" class="btn">Export HTML Report</a>
-                <a href="/api/v2/export/json" class="btn">Export JSON</a>
-                <a href="/docs" class="btn">API Documentation</a>
-            </div>
-        </div>
-        
-        <script>
-            // WebSocket connection for real-time updates
-            const ws = new WebSocket('ws://localhost:8000/ws');
-            const wsStatus = document.getElementById('ws-status');
-            
-            ws.onopen = function(event) {{
-                wsStatus.textContent = 'Connected';
-                wsStatus.className = 'ws-status ws-connected';
-                ws.send(JSON.stringify({{type: 'subscribe_updates'}}));
-            }};
-            
-            ws.onclose = function(event) {{
-                wsStatus.textContent = 'Disconnected';
-                wsStatus.className = 'ws-status ws-disconnected';
-            }};
-            
-            ws.onmessage = function(event) {{
-                const data = JSON.parse(event.data);
-                if (data.type === 'scan_update') {{
-                    console.log('Scan update:', data);
-                    // Handle real-time scan updates
-                }}
-            }};
-            
-            // Severity distribution chart
-            const ctx = document.getElementById('severityChart').getContext('2d');
-            new Chart(ctx, {{
-                type: 'doughnut',
-                data: {{
-                    labels: ['Critical', 'High', 'Medium', 'Low'],
-                    datasets: [{{
-                        data: [{context['severity_distribution']['critical']}, {context['severity_distribution']['high']}, {context['severity_distribution']['medium']}, {context['severity_distribution']['low']}],
-                        backgroundColor: ['#e74c3c', '#f39c12', '#3498db', '#27ae60']
-                    }}]
-                }},
-                options: {{
-                    responsive: true,
-                    maintainAspectRatio: false
-                }}
-            }});
-            
-            // Keep WebSocket alive
-            setInterval(() => {{
-                if (ws.readyState === WebSocket.OPEN) {{
-                    ws.send(JSON.stringify({{type: 'ping'}}));
-                }}
-            }}, 30000);
-        </script>
-    </body>
-    </html>
-    """
+

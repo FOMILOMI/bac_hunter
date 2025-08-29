@@ -1,0 +1,40 @@
+# BAC Hunter Repository Cleanup & Optimization TODOs
+
+## Phase 1: Aggressive Cleanup & Garbage Removal ✅ COMPLETED
+- [x] Remove all cache, temp, and unnecessary files (pyc, pyo, .DS_Store, .log, .egg-info, node_modules, etc.)
+- [x] Remove incomplete/broken/empty files and unused assets
+- [x] Clean up unrelated and personal files
+
+## Phase 2: Frontend Consolidation & Optimization ✅ COMPLETED
+- [x] Analyze all frontend assets (HTML, CSS, JS, images)
+- [x] Remove duplicates and unused files
+- [x] Consolidate to modern React frontend
+- [x] Remove old HTML templates and static files
+- [x] Update server to serve React frontend
+
+## Phase 3: Backend Code Optimization ✅ COMPLETED
+- [x] Scan for duplicate functions, unused imports, debug code
+- [x] Create shared utility module for similarity calculations
+- [x] Consolidate duplicate functions across modules
+- [x] Remove demo files with print statements
+- [x] Clean up TODO comments
+
+## Phase 4: File Structure Reorganization ✅ COMPLETED
+- [x] Organize documentation into logical folders
+- [x] Consolidate requirements files into single requirements.txt
+- [x] Create proper setup.py for package installation
+- [x] Remove old configuration files
+
+## Phase 5: Dependencies & Configuration Cleanup ✅ COMPLETED
+- [x] Clean up .gitignore and ensure it's comprehensive
+- [x] Verify all dependencies are properly specified
+- [x] Test package installation (setup.py syntax verified)
+
+## Phase 6: README.md Rewrite ✅ COMPLETED
+- [x] Analyze actual features and rewrite documentation
+- [x] Create comprehensive and accurate README.md
+
+## Phase 7: Quality Assurance 🔄 IN PROGRESS
+- [ ] Test all commands and features
+- [ ] Verify documentation accuracy and code standards
+- [ ] Final validation and cleanup

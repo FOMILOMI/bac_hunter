@@ -1,4 +1,8 @@
-# Core dependencies
+# BAC Hunter - Security Testing Tool Dependencies
+# =============================================
+
+# Core Dependencies (Required)
+# ---------------------------
 httpx==0.27.0
 typer==0.12.3
 click==8.1.7
@@ -6,95 +10,117 @@ PyYAML==6.0.1
 rich==13.7.1
 Jinja2==3.1.4
 
-# Web framework and dashboard
+# Web Framework & Dashboard
+# -------------------------
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 websockets==12.0
 
-# AI and Machine Learning
+# Data Processing & Analysis
+# --------------------------
 numpy==1.26.4
-scikit-learn==1.5.2
-tensorflow-cpu==2.20.0
-torch==2.2.0
-transformers==4.37.2
-spacy==3.7.2
-nltk==3.9.1
 pandas==2.1.4
-
-# Deep Learning and Neural Networks
-keras==2.20.0
-joblib==1.3.2
-
-# Data visualization and analysis
-matplotlib==3.8.2
-seaborn==0.13.0
-plotly==5.17.0
-
-# Natural Language Processing
-textblob==0.17.1
-wordcloud==1.9.3
-
-# Security and cryptography
-cryptography==41.0.8
-bcrypt==4.1.2
-
-# Database and storage
-sqlalchemy==2.0.23
-alembic==1.13.1
-
-# Monitoring and metrics
-prometheus-client==0.19.0
-psutil==5.9.6
-
-# Browser automation (optional)
-selenium==4.23.1
-playwright==1.47.0
-
-# Report generation
-weasyprint==62.3
-reportlab==4.0.7
-
-# API testing and validation
-pydantic==2.5.2
-jsonschema==4.20.0
-
-# Network and HTTP
-aiohttp==3.9.1
-requests==2.31.0
-
-# Data processing
 python-dateutil==2.8.2
 pytz==2023.3
 
-# Configuration and environment
+# Security & Cryptography
+# -----------------------
+cryptography>=41.0.0
+bcrypt>=4.1.0
+
+# Database & Storage
+# ------------------
+sqlalchemy==2.0.23
+alembic==1.13.1
+
+# Network & HTTP
+# --------------
+aiohttp==3.9.1
+requests==2.31.0
+
+# Configuration & Environment
+# ---------------------------
 python-dotenv==1.0.0
 configparser==6.0.0
 
-# Logging and debugging
+# Logging & Debugging
+# -------------------
 structlog==23.2.0
 colorama==0.4.6
 
-# Testing and development
-pytest==7.4.3
-pytest-asyncio==0.21.1
-pytest-cov==4.1.0
-black==23.12.0
-flake8==6.1.0
-mypy==1.8.0
+# API & Validation
+# ----------------
+pydantic==2.5.2
+jsonschema==4.20.0
 
-# Documentation
-sphinx==7.2.6
-sphinx-rtd-theme==2.0.0
-
-# Performance and optimization
-cython==3.0.6
-numba==0.58.1
-
-# Cloud and deployment
-boto3==1.34.0
-docker==6.1.3
-
-# Additional utilities
+# Utilities
+# ---------
 tqdm==4.66.1
 click-spinner==0.1.10
 tabulate==0.9.0
+
+# AI & Machine Learning (Optional)
+# --------------------------------
+# Uncomment these if you need AI features
+# numpy==1.26.4  # Already included above
+# scikit-learn==1.5.2
+# tensorflow-cpu==2.20.0
+# torch==2.2.0
+# transformers==4.37.2
+# spacy==3.7.2
+# nltk==3.9.1
+
+# Deep Learning (Optional)
+# ------------------------
+# keras==2.20.0
+# joblib==1.3.2
+
+# Data Visualization (Optional)
+# -----------------------------
+# matplotlib==3.8.2
+# seaborn==0.13.0
+# plotly==5.17.0
+
+# Natural Language Processing (Optional)
+# -------------------------------------
+# textblob==0.17.1
+# wordcloud==1.9.3
+
+# Browser Automation (Optional)
+# -----------------------------
+# selenium==4.23.1
+# playwright==1.47.0
+
+# Report Generation (Optional)
+# ----------------------------
+# weasyprint==62.3
+# reportlab==4.0.7
+
+# Monitoring & Metrics (Optional)
+# -------------------------------
+# prometheus-client==0.19.0
+# psutil==5.9.6
+
+# Testing & Development (Optional)
+# --------------------------------
+# pytest==7.4.3
+# pytest-asyncio==0.21.1
+# pytest-cov==4.1.0
+# black==23.12.0
+# flake8==6.1.0
+# mypy==1.8.0
+
+# Documentation (Optional)
+# ------------------------
+# sphinx==7.2.6
+# sphinx-rtd-theme==2.0.0
+
+# Performance & Optimization (Optional)
+# ------------------------------------
+# cython==3.0.6
+# numba==0.58.1
+
+# Cloud & Deployment (Optional)
+# -----------------------------
+# boto3==1.34.0
+# docker==6.1.3

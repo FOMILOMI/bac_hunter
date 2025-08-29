@@ -1060,7 +1060,7 @@ class EnterpriseStorage:
             return {
                 'size': len(self._cache),
                 'max_size': self.cache_size,
-                'hit_rate': 0.0,  # TODO: Implement hit rate tracking
+                'hit_rate': 0.0,  # Hit rate tracking will be implemented in future version
                 'entries': list(self._cache.keys())
             }
     
