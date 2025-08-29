@@ -478,21 +478,49 @@ ai_engine = AdvancedAIEngine()
 # Mount static files
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-templates_dir = Path(__file__).parent.parent.parent / "templates"
-templates = Jinja2Templates(directory=str(templates_dir))
+   from pathlib import Path
+
+# Get the absolute path to the directory where modern_dashboard.py resides
+BASE_DIR = Path(__file__).resolve().parent
+
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+
+# Templates directory - check both webapp/templates and project root templates
+templates_dir = BASE_DIR / "templates"
+if not templates_dir.exists():
+    # Fall back to project root templates directory
+    templates_dir = BASE_DIR.parent.parent / "templates"
+
+if templates_dir.exists():
+    templates = Jinja2Templates(directory=str(templates_dir))
+else:
+    templates = None
 
 # API Routes
 @app.get("/")
 async def get_dashboard(request: Request):
     """Serve the main dashboard."""
-    return templates.TemplateResponse("dashboard.html", {"request": request})
+    if templates:
+        return templates.TemplateResponse("dashboard.html", {"request": request})
+    else:
+        # Fallback to embedded HTML if templates not found
+        return HTMLResponse(_get_embedded_dashboard_html())
 
 @app.get("/api/projects")
 async def get_projects():
     """Get all projects."""
     projects = project_manager.get_all_projects()
     return {"projects": [project.to_dict() for project in projects]}
+
+# Add favicon route to prevent 404 errors
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve favicon to prevent 404 errors"""
+    favicon_path = BASE_DIR / "static" / "favicon.ico"
+    if favicon_path.exists():
+        return FileResponse(str(favicon_path))
+    else:
+        return JSONResponse({"message": "favicon not found"}, status_code=404)
 
 @app.post("/api/projects")
 async def create_project(request: ProjectCreateRequest):
@@ -648,6 +676,81 @@ async def run_scan(project_id: str, scan_request: ScanRequest):
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+
+def _get_embedded_dashboard_html() -> str:
+    """Fallback HTML dashboard when templates are not available"""
+    return """
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>BAC Hunter - Modern Dashboard</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+        <style>
+            body { background: #1a1a1a; color: #ecf0f1; font-family: 'Segoe UI', sans-serif; }
+            .card { background: #2d2d2d; border: 1px solid #444; }
+            .btn-primary { background: #3498db; border: none; }
+            .navbar { background: #2c3e50 !important; }
+        </style>
+    </head>
+    <body>
+        <nav class="navbar navbar-expand-lg navbar-dark">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#"><i class="fas fa-shield-alt"></i> BAC Hunter</a>
+            </div>
+        </nav>
+        <div class="container mt-4">
+            <div class="row">
+                <div class="col-12">
+                    <div class="card">
+                        <div class="card-body text-center">
+                            <h1><i class="fas fa-rocket"></i> BAC Hunter Modern Dashboard</h1>
+                            <p class="lead">Professional security testing platform is now running!</p>
+                            <div class="row mt-4">
+                                <div class="col-md-4">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h3 id="project-count">0</h3>
+                                            <p>Active Projects</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h3 id="scan-count">0</h3>
+                                            <p>Running Scans</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h3 id="finding-count">0</h3>
+                                            <p>Total Findings</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+            // Load basic stats
+            fetch('/api/projects')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('project-count').textContent = data.projects.length;
+                })
+                .catch(console.error);
+        </script>
+    </body>
+    </html>
+    """
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8080)

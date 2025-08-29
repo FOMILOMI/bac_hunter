@@ -114,6 +114,16 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+# Add favicon route to prevent 404 errors
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve favicon to prevent 404 errors"""
+    favicon_path = static_dir / "favicon.ico"
+    if favicon_path.exists():
+        return FileResponse(str(favicon_path))
+    else:
+        return JSONResponse({"message": "favicon not found"}, status_code=404)
+
 @app.get("/")
 async def dashboard_home(request: Request):
     """Enhanced dashboard home page"""
@@ -169,6 +179,45 @@ async def websocket_endpoint(websocket: WebSocket):
         _connection_manager.disconnect(websocket)
 
 
+# Add missing /api/projects routes for compatibility
+@app.get("/api/projects")
+async def get_projects_compat():
+    """Get all projects - compatibility route for frontend"""
+    # Get all targets as projects since we don't have a separate projects table
+    projects = []
+    with _db.conn() as c:
+        for target_id, base_url in c.execute("SELECT id, base_url FROM targets ORDER BY id DESC"):
+            # Count findings for this target
+            finding_count = c.execute("SELECT COUNT(*) FROM findings WHERE target_id = ?", (target_id,)).fetchone()[0]
+            
+            projects.append({
+                "id": str(target_id),
+                "name": f"Target {target_id}",
+                "description": f"Security assessment of {base_url}",
+                "target_url": base_url,
+                "status": "completed" if finding_count > 0 else "created",
+                "finding_count": finding_count,
+                "scan_count": 1,
+                "created_at": "2024-01-01T00:00:00"  # Default timestamp
+            })
+    
+    return {"projects": projects}
+
+@app.post("/api/projects")
+async def create_project_compat(request: dict):
+    """Create a new project - compatibility route"""
+    target_url = request.get("target_url")
+    if not target_url:
+        raise HTTPException(status_code=400, detail="target_url is required")
+    
+    # Ensure target exists in database
+    target_id = _db.ensure_target(target_url)
+    
+    return {
+        "project_id": str(target_id),
+        "message": "Project created successfully"
+    }
+
 @app.get("/api/v2/stats")
 async def get_enhanced_stats():
     """Get enhanced statistics with more detailed information"""
@@ -180,12 +229,13 @@ async def get_enhanced_stats():
     severity_over_time = {}
     target_distribution = {}
     
-    for timestamp, finding_type, url, description, score in findings_list:
+    for target_id, finding_type, url, description, score in findings_list:
         # Finding types distribution
         finding_types[finding_type] = finding_types.get(finding_type, 0) + 1
         
-        # Severity over time (group by day)
-        date_str = timestamp.split('T')[0] if 'T' in timestamp else timestamp[:10]
+        # Severity over time (group by day) - using current date since we don't have timestamps
+        from datetime import datetime
+        date_str = datetime.now().strftime('%Y-%m-%d')
         if date_str not in severity_over_time:
             severity_over_time[date_str] = {"critical": 0, "high": 0, "medium": 0, "low": 0}
         
@@ -584,6 +634,44 @@ async def run_scan_with_updates(scan_id: str, scan_request: ScanRequest):
             "status": "failed",
             "error": str(e)
         }))
+
+
+# Add missing routes that frontend expects
+@app.get("/api/v2/projects")
+async def get_projects_v2():
+    """Get all projects - v2 API"""
+    return await get_projects_compat()
+
+@app.get("/api/v2/activity")
+async def get_recent_activity():
+    """Get recent activity for dashboard"""
+    activities = []
+    
+    # Get recent findings as activities
+    for target_id, finding_type, url, description, score in _db.iter_findings(limit=10):
+        activities.append({
+            "title": f"New {finding_type} finding",
+            "description": f"Found in {url[:50]}...",
+            "timestamp": datetime.now().isoformat(),
+            "type": "finding"
+        })
+    
+    return activities
+
+@app.get("/api/targets")
+async def get_targets():
+    """Get all targets"""
+    targets = []
+    with _db.conn() as c:
+        for target_id, base_url in c.execute("SELECT id, base_url FROM targets"):
+            finding_count = c.execute("SELECT COUNT(*) FROM findings WHERE target_id = ?", (target_id,)).fetchone()[0]
+            targets.append({
+                "id": target_id,
+                "base_url": base_url,
+                "finding_count": finding_count
+            })
+    
+    return {"targets": targets}
 
 
 def _get_embedded_dashboard_html(context: Dict[str, Any]) -> str:
