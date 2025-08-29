@@ -579,3 +579,29 @@ export interface PerformanceStats {
   throughput: number
   error_rate: number
 }
+
+// Missing types for state management
+export interface UIPreferences {
+  theme: 'dark' | 'light'
+  sidebar_collapsed: boolean
+  default_page_size: number
+  auto_refresh_interval: number
+  show_tooltips: boolean
+  compact_mode: boolean
+}
+
+export interface DashboardStats {
+  total_projects: number
+  active_projects: number
+  total_scans: number
+  active_scans: number
+  total_findings: number
+  critical_findings: number
+  high_findings: number
+  medium_findings: number
+  low_findings: number
+  scan_success_rate: number
+  average_scan_duration: number
+  last_scan_date?: string
+  last_updated: string
+}

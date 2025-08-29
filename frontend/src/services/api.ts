@@ -261,10 +261,13 @@ export const uploadAPI = {
 
 // WebSocket API (for real-time updates)
 export const websocketAPI = {
-  connect: (token: string) => {
+  connect: (token?: string) => {
     // WebSocket connection logic would go here
     // This is a placeholder for the actual implementation
-    return new WebSocket(`ws://localhost:8000/ws?token=${token}`)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.host
+    const url = `${protocol}//${host}/ws${token ? `?token=${token}` : ''}`
+    return new WebSocket(url)
   },
   subscribe: (channel: string) => {
     // Subscription logic would go here
@@ -272,6 +275,11 @@ export const websocketAPI = {
   unsubscribe: (channel: string) => {
     // Unsubscription logic would go here
   },
+}
+
+// WebSocket connection helper function
+export const createWebSocketConnection = (token?: string) => {
+  return websocketAPI.connect(token)
 }
 
 // Utility functions
