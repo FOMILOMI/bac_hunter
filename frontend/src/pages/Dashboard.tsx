@@ -1,174 +1,153 @@
 import React, { useState, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import {
   Box,
-  Typography,
-  Button,
+  Grid,
   Card,
   CardContent,
-  Grid,
+  Typography,
   Chip,
-  IconButton,
-  useTheme,
-  alpha,
   LinearProgress,
-  Badge,
-  Paper,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemIcon,
-  ListItemSecondaryAction,
-  Divider,
+  IconButton,
+  Tooltip,
   Alert,
   Skeleton,
-  Tooltip,
-  CircularProgress,
-  Avatar,
-  CardActions,
-  Collapse,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Button,
 } from '@mui/material'
 import {
-  Dashboard as DashboardIcon,
-  TrendingUp as TrendIcon,
-  Security as SecurityIcon,
-  BugReport as FindingIcon,
-  Psychology as AIIcon,
-  Assessment as ReportIcon,
-  Storage as SessionIcon,
-  Code as CodeIcon,
-  Refresh as RefreshIcon,
-  Visibility as ViewIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
-  AutoAwesome as AutoAwesomeIcon,
-  Timeline as TimelineIcon,
-  Speed as SpeedIcon,
-  CheckCircle as SuccessIcon,
-  Warning as WarningIcon,
-  Error as ErrorIcon,
-  Info as InfoIcon,
-  Schedule as ScheduleIcon,
-  Email as EmailIcon,
-  CloudDownload as CloudDownloadIcon,
-  PictureAsPdf as PDFIcon,
-  Description as HTMLIcon,
-  TableChart as CSVIcon,
-  DataObject as JSONIcon,
-  Upload as UploadIcon,
   PlayArrow as PlayIcon,
   Stop as StopIcon,
-  Pause as PauseIcon,
-  Replay as ReplayIcon,
-  AccountTree as TreeIcon,
-  NetworkCheck as NetworkIcon,
-  Http as HttpIcon,
-  Lock as LockIcon,
-  Public as PublicIcon,
-  Send as SendIcon,
-  Save as SaveIcon,
-  Folder as FolderIcon,
-  History as HistoryIcon,
-  Add as AddIcon,
-  Search as SearchIcon,
-  FilterList as FilterIcon,
-  MoreVert as MoreIcon,
+  Refresh as RefreshIcon,
   TrendingUp as TrendingUpIcon,
-  TrendingDown as TrendingDownIcon,
-  TrendingFlat as TrendingFlatIcon,
-  BarChart as BarChartIcon,
-  PieChart as PieChartIcon,
-  ShowChart as ShowChartIcon,
-  ContentCopy as CopyIcon,
-  Download as DownloadIcon,
+  BugReport as BugIcon,
+  Security as SecurityIcon,
+  Speed as SpeedIcon,
+  Psychology as AIIcon,
 } from '@mui/icons-material'
-import { motion, AnimatePresence } from 'framer-motion'
-import { useNavigate } from 'react-router-dom'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'react-hot-toast'
 
-import { dashboardAPI } from '../services/api'
-import { Project, Scan, Finding, AIInsight, Report, Session } from '../types'
-import DashboardWidget from '../components/dashboard/DashboardWidget'
-import MetricsOverview from '../components/dashboard/MetricsOverview'
-import RecentActivity from '../components/dashboard/RecentActivity'
-import QuickActions from '../components/dashboard/QuickActions'
-import SecurityOverview from '../components/dashboard/SecurityOverview'
-import PerformanceMetrics from '../components/dashboard/PerformanceMetrics'
+import APIService, { ScanRequest } from '../services/api'
+import { useDashboardStore } from '../store/dashboardStore'
+import { useWebSocketStore } from '../store/webSocketStore'
+import StatusIndicator from '../components/StatusIndicator'
 
 const Dashboard: React.FC = () => {
-  const theme = useTheme()
-  const navigate = useNavigate()
-  const [autoRefresh, setAutoRefresh] = useState(true)
-  const [expandedWidgets, setExpandedWidgets] = useState<Set<string>>(new Set())
+  const [selectedTimeRange, setSelectedTimeRange] = useState<'24h' | '7d' | '30d'>('24h')
+  const { stats, setStats } = useDashboardStore()
+  const { connected } = useWebSocketStore()
+  const queryClient = useQueryClient()
 
-  // Fetch dashboard data with auto-refresh
-  const {
-    data: dashboardData,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery(['dashboard'], dashboardAPI.getOverview, {
-    refetchInterval: autoRefresh ? 30000 : false, // Refresh every 30 seconds if enabled
+  // Fetch dashboard data
+  const { data: overviewStats, isLoading: statsLoading, error: statsError } = useQuery({
+    queryKey: ['dashboard-stats', selectedTimeRange],
+    queryFn: () => APIService.getOverviewStats(),
+    refetchInterval: 30000, // Refresh every 30 seconds
   })
 
-  const data = dashboardData || {
-    projects: [],
-    scans: [],
-    findings: [],
-    insights: [],
-    reports: [],
-    sessions: [],
-    metrics: {},
-    recentActivity: [],
-  }
+  const { data: targetStats, isLoading: targetStatsLoading } = useQuery({
+    queryKey: ['target-stats'],
+    queryFn: () => APIService.getTargetStats(),
+    refetchInterval: 60000, // Refresh every minute
+  })
 
-  const toggleWidgetExpansion = (widgetId: string) => {
-    const newExpanded = new Set(expandedWidgets)
-    if (newExpanded.has(widgetId)) {
-      newExpanded.delete(widgetId)
-    } else {
-      newExpanded.add(widgetId)
+  const { data: findingStats, isLoading: findingStatsLoading } = useQuery({
+    queryKey: ['finding-stats'],
+    queryFn: () => APIService.getFindingStats(),
+    refetchInterval: 60000,
+  })
+
+  const { data: aiModels, isLoading: aiModelsLoading } = useQuery({
+    queryKey: ['ai-models'],
+    queryFn: () => APIService.listAIModels(),
+    refetchInterval: 120000, // Refresh every 2 minutes
+  })
+
+  // Recent scans
+  const { data: recentScans, isLoading: scansLoading } = useQuery({
+    queryKey: ['recent-scans'],
+    queryFn: () => APIService.listScans({ limit: 5 }),
+    refetchInterval: 15000, // Refresh every 15 seconds
+  })
+
+  // Quick scan mutation
+  const quickScanMutation = useMutation({
+    mutationFn: (target: string) => APIService.createScan({
+      target,
+      mode: 'standard',
+      max_rps: 2.0,
+      phases: ['recon', 'access'],
+      enable_ai: true,
+    }),
+    onSuccess: (data) => {
+      toast.success(`Quick scan started: ${data.scan_id}`)
+      queryClient.invalidateQueries({ queryKey: ['recent-scans'] })
+    },
+    onError: (error) => {
+      toast.error('Failed to start quick scan')
+    },
+  })
+
+  // Update stats when WebSocket data arrives
+  useEffect(() => {
+    if (overviewStats) {
+      setStats(overviewStats)
     }
-    setExpandedWidgets(newExpanded)
+  }, [overviewStats, setStats])
+
+  // Mock data for charts (replace with real data)
+  const scanTrendData = [
+    { time: '00:00', scans: 12, findings: 45 },
+    { time: '04:00', scans: 8, findings: 32 },
+    { time: '08:00', scans: 25, findings: 89 },
+    { time: '12:00', scans: 18, findings: 67 },
+    { time: '16:00', scans: 22, findings: 78 },
+    { time: '20:00', scans: 15, findings: 54 },
+  ]
+
+  const severityDistribution = [
+    { name: 'Critical', value: 15, color: '#f44336' },
+    { name: 'High', value: 28, color: '#ff9800' },
+    { name: 'Medium', value: 45, color: '#ffc107' },
+    { name: 'Low', value: 32, color: '#4caf50' },
+    { name: 'Info', value: 20, color: '#2196f3' },
+  ]
+
+  const handleQuickScan = (target: string) => {
+    if (!target.trim()) {
+      toast.error('Please enter a target URL')
+      return
+    }
+    quickScanMutation.mutate(target)
   }
 
-  const handleQuickAction = (action: string) => {
-    switch (action) {
-      case 'new-project':
-        navigate('/projects')
-        break
-      case 'new-scan':
-        navigate('/scans')
-        break
-      case 'view-findings':
-        navigate('/findings')
-        break
-      case 'ai-insights':
-        navigate('/ai-insights')
-        break
-      case 'generate-report':
-        navigate('/reports')
-        break
-      case 'manage-sessions':
-        navigate('/sessions')
-        break
-      case 'api-testing':
-        navigate('/api-testing')
-        break
-      default:
-        break
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'running': return 'success'
+      case 'completed': return 'primary'
+      case 'failed': return 'error'
+      case 'pending': return 'warning'
+      default: return 'default'
     }
   }
 
-  if (error) {
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'critical': return 'error'
+      case 'high': return 'error'
+      case 'medium': return 'warning'
+      case 'low': return 'info'
+      default: return 'default'
+    }
+  }
+
+  if (statsError) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to load dashboard data: {(error as any).message}
+        <Alert severity="error" sx={{ mb: 3 }}>
+          Failed to load dashboard data. Please check your connection and try again.
         </Alert>
-        <Button onClick={() => refetch()} startIcon={<RefreshIcon />}>
+        <Button variant="contained" onClick={() => queryClient.invalidateQueries()}>
           Retry
         </Button>
       </Box>
@@ -176,340 +155,286 @@ const Dashboard: React.FC = () => {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', pb: 4 }}>
+    <Box sx={{ p: 3 }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
-        <Box>
-          <Typography variant="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Dashboard Overview
+      <Box sx={{ mb: 4 }}>
+        <Typography variant="h4" component="h1" gutterBottom>
+          Dashboard
+        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <StatusIndicator connected={connected} />
+          <Typography variant="body2" color="text.secondary">
+            {connected ? 'Connected to BAC Hunter' : 'Disconnected'}
           </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Comprehensive overview of your security testing activities and insights
-          </Typography>
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={() => refetch()}
-            disabled={isLoading}
-          >
-            Refresh
-          </Button>
         </Box>
       </Box>
 
       {/* Quick Actions */}
-      <QuickActions onAction={handleQuickAction} />
-
-      {/* Metrics Overview */}
-      <MetricsOverview
-        projects={data.projects}
-        scans={data.scans}
-        findings={data.findings}
-        insights={data.insights}
-        reports={data.reports}
-        sessions={data.sessions}
-        isLoading={isLoading}
-      />
-
-      {/* Main Dashboard Grid */}
-      <Grid container spacing={3} sx={{ mb: 3 }}>
-        {/* Security Overview */}
-        <Grid item xs={12} lg={8}>
-          <DashboardWidget
-            title="Security Overview"
-            icon={<SecurityIcon />}
-            expanded={expandedWidgets.has('security')}
-            onToggleExpansion={() => toggleWidgetExpansion('security')}
-          >
-            <SecurityOverview
-              findings={data.findings}
-              scans={data.scans}
-              isLoading={isLoading}
-            />
-          </DashboardWidget>
-        </Grid>
-
-        {/* Performance Metrics */}
-        <Grid item xs={12} lg={4}>
-          <DashboardWidget
-            title="Performance Metrics"
-            icon={<SpeedIcon />}
-            expanded={expandedWidgets.has('performance')}
-            onToggleExpansion={() => toggleWidgetExpansion('performance')}
-          >
-            <PerformanceMetrics
-              scans={data.scans}
-              sessions={data.sessions}
-              isLoading={isLoading}
-            />
-          </DashboardWidget>
-        </Grid>
-
-        {/* Recent Activity */}
-        <Grid item xs={12} lg={6}>
-          <DashboardWidget
-            title="Recent Activity"
-            icon={<TimelineIcon />}
-            expanded={expandedWidgets.has('activity')}
-            onToggleExpansion={() => toggleWidgetExpansion('activity')}
-          >
-            <RecentActivity
-              activity={data.recentActivity}
-              isLoading={isLoading}
-            />
-          </DashboardWidget>
-        </Grid>
-
-        {/* AI Insights Summary */}
-        <Grid item xs={12} lg={6}>
-          <DashboardWidget
-            title="AI Insights Summary"
-            icon={<AIIcon />}
-            expanded={expandedWidgets.has('ai-insights')}
-            onToggleExpansion={() => toggleWidgetExpansion('ai-insights')}
-          >
-            <Box>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Card sx={{ textAlign: 'center', p: 2 }}>
-                    <Typography variant="h4" color="primary.main" sx={{ fontWeight: 700 }}>
-                      {data.insights.filter(i => i.category === 'security').length}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Security Insights
-                    </Typography>
-                  </Card>
-                </Grid>
-                <Grid item xs={6}>
-                  <Card sx={{ textAlign: 'center', p: 2 }}>
-                    <Typography variant="h4" color="warning.main" sx={{ fontWeight: 700 }}>
-                      {data.insights.filter(i => i.category === 'performance').length}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Performance Tips
-                    </Typography>
-                  </Card>
-                </Grid>
-                <Grid item xs={12}>
-                  <List dense>
-                    {data.insights.slice(0, 3).map((insight, index) => (
-                      <ListItem key={insight.id || index}>
-                        <ListItemIcon>
-                          <AIIcon color="primary" />
-                        </ListItemIcon>
-                        <ListItemText
-                          primary={insight.title}
-                          secondary={insight.description}
-                          primaryTypographyProps={{ variant: 'body2', fontWeight: 600 }}
-                          secondaryTypographyProps={{ variant: 'caption' }}
-                        />
-                        <Chip
-                          label={insight.category}
-                          size="small"
-                          color="primary"
-                          variant="outlined"
-                        />
-                      </ListItem>
-                    ))}
-                  </List>
-                </Grid>
-              </Grid>
-            </Box>
-          </DashboardWidget>
-        </Grid>
-
-        {/* Projects Summary */}
-        <Grid item xs={12} lg={4}>
-          <DashboardWidget
-            title="Projects Summary"
-            icon={<FolderIcon />}
-            expanded={expandedWidgets.has('projects')}
-            onToggleExpansion={() => toggleWidgetExpansion('projects')}
-          >
-            <Box>
-              <Typography variant="h6" sx={{ mb: 2 }}>
-                Active Projects: {data.projects.filter(p => p.status === 'active').length}
-              </Typography>
-              <List dense>
-                {data.projects.slice(0, 5).map((project, index) => (
-                  <ListItem key={project.id || index}>
-                    <ListItemIcon>
-                      <FolderIcon color="primary" />
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={project.name}
-                      secondary={`${project.scans?.length || 0} scans`}
-                      primaryTypographyProps={{ variant: 'body2', fontWeight: 600 }}
-                      secondaryTypographyProps={{ variant: 'caption' }}
-                    />
-                    <Chip
-                      label={project.status}
-                      size="small"
-                      color={project.status === 'active' ? 'success' : 'default'}
-                      variant="outlined"
-                    />
-                  </ListItem>
-                ))}
-              </List>
-            </Box>
-          </DashboardWidget>
-        </Grid>
-
-        {/* Scans Status */}
-        <Grid item xs={12} lg={4}>
-          <DashboardWidget
-            title="Scans Status"
-            icon={<SearchIcon />}
-            expanded={expandedWidgets.has('scans')}
-            onToggleExpansion={() => toggleWidgetExpansion('scans')}
-          >
-            <Box>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <Card sx={{ textAlign: 'center', p: 2 }}>
-                    <Typography variant="h4" color="info.main" sx={{ fontWeight: 700 }}>
-                      {data.scans.filter(s => s.status === 'running').length}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Running
-                    </Typography>
-                  </Card>
-                </Grid>
-                <Grid item xs={6}>
-                  <Card sx={{ textAlign: 'center', p: 2 }}>
-                    <Typography variant="h4" color="success.main" sx={{ fontWeight: 700 }}>
-                      {data.scans.filter(s => s.status === 'completed').length}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Completed
-                    </Typography>
-                  </Card>
-                </Grid>
-                <Grid item xs={12}>
-                  <LinearProgress
-                    variant="determinate"
-                    value={
-                      data.scans.length > 0
-                        ? (data.scans.filter(s => s.status === 'completed').length / data.scans.length) * 100
-                        : 0
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Typography variant="h6" gutterBottom>
+            Quick Actions
+          </Typography>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={6}>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <input
+                  type="text"
+                  placeholder="Enter target URL (e.g., https://example.com)"
+                  style={{
+                    flex: 1,
+                    padding: '8px 12px',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px',
+                    fontSize: '14px'
+                  }}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      const target = (e.target as HTMLInputElement).value
+                      handleQuickScan(target)
                     }
-                    sx={{ height: 8, borderRadius: 4 }}
-                  />
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-                    Completion Rate
+                  }}
+                />
+                <Button
+                  variant="contained"
+                  startIcon={<PlayIcon />}
+                  onClick={() => {
+                    const input = document.querySelector('input[type="text"]') as HTMLInputElement
+                    if (input) handleQuickScan(input.value)
+                  }}
+                  disabled={quickScanMutation.isPending}
+                >
+                  Quick Scan
+                </Button>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={6}>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="outlined"
+                  startIcon={<RefreshIcon />}
+                  onClick={() => queryClient.invalidateQueries()}
+                >
+                  Refresh Data
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={<AIIcon />}
+                  onClick={() => {/* Navigate to AI insights */}}
+                >
+                  AI Analysis
+                </Button>
+              </Box>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
+
+      {/* Statistics Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography color="text.secondary" gutterBottom>
+                    Total Scans
                   </Typography>
-                </Grid>
-              </Grid>
-            </Box>
-          </DashboardWidget>
+                  <Typography variant="h4">
+                    {statsLoading ? <Skeleton width={60} /> : (overviewStats?.scans_last_24h || 0)}
+                  </Typography>
+                </Box>
+                <SpeedIcon color="primary" sx={{ fontSize: 40 }} />
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
 
-        {/* Findings Summary */}
-        <Grid item xs={12} lg={4}>
-          <DashboardWidget
-            title="Findings Summary"
-            icon={<FindingIcon />}
-            expanded={expandedWidgets.has('findings')}
-            onToggleExpansion={() => toggleWidgetExpansion('findings')}
-          >
-            <Box>
-              <Grid container spacing={2}>
-                <Grid item xs={4}>
-                  <Card sx={{ textAlign: 'center', p: 2 }}>
-                    <Typography variant="h4" color="error.main" sx={{ fontWeight: 700 }}>
-                      {data.findings.filter(f => f.severity === 'critical').length}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Critical
-                    </Typography>
-                  </Card>
-                </Grid>
-                <Grid item xs={4}>
-                  <Card sx={{ textAlign: 'center', p: 2 }}>
-                    <Typography variant="h4" color="warning.main" sx={{ fontWeight: 700 }}>
-                      {data.findings.filter(f => f.severity === 'high').length}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      High
-                    </Typography>
-                  </Card>
-                </Grid>
-                <Grid item xs={4}>
-                  <Card sx={{ textAlign: 'center', p: 2 }}>
-                    <Typography variant="h4" color="info.main" sx={{ fontWeight: 700 }}>
-                      {data.findings.filter(f => f.severity === 'medium').length}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Medium
-                    </Typography>
-                  </Card>
-                </Grid>
-                <Grid item xs={12}>
-                  <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-                    Total: {data.findings.length} findings
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography color="text.secondary" gutterBottom>
+                    Total Findings
                   </Typography>
-                </Grid>
-              </Grid>
-            </Box>
-          </DashboardWidget>
+                  <Typography variant="h4">
+                    {statsLoading ? <Skeleton width={60} /> : (overviewStats?.findings_last_24h || 0)}
+                  </Typography>
+                </Box>
+                <BugIcon color="error" sx={{ fontSize: 40 }} />
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography color="text.secondary" gutterBottom>
+                    Active Scans
+                  </Typography>
+                  <Typography variant="h4">
+                    {statsLoading ? <Skeleton width={60} /> : (overviewStats?.scans_by_status?.running || 0)}
+                  </Typography>
+                </Box>
+                <PlayIcon color="success" sx={{ fontSize: 40 }} />
+              </Box>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12} sm={6} md={3}>
+          <Card>
+            <CardContent>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Box>
+                  <Typography color="text.secondary" gutterBottom>
+                    AI Models
+                  </Typography>
+                  <Typography variant="h4">
+                    {aiModelsLoading ? <Skeleton width={60} /> : (aiModels?.models?.length || 0)}
+                  </Typography>
+                </Box>
+                <AIIcon color="secondary" sx={{ fontSize: 40 }} />
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
 
-      {/* Bottom Row - Full Width Widgets */}
+      {/* Charts Row */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        {/* Scan Trends */}
+        <Grid item xs={12} md={8}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Scan Activity (Last 24 Hours)
+              </Typography>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={scanTrendData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="time" />
+                  <YAxis />
+                  <RechartsTooltip />
+                  <Line type="monotone" dataKey="scans" stroke="#2196f3" strokeWidth={2} />
+                  <Line type="monotone" dataKey="findings" stroke="#f44336" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* Severity Distribution */}
+        <Grid item xs={12} md={4}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Findings by Severity
+              </Typography>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={severityDistribution}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {severityDistribution.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <RechartsTooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
+      {/* Recent Activity */}
       <Grid container spacing={3}>
-        {/* System Health */}
-        <Grid item xs={12}>
-          <DashboardWidget
-            title="System Health & Status"
-            icon={<NetworkIcon />}
-            expanded={expandedWidgets.has('system-health')}
-            onToggleExpansion={() => toggleWidgetExpansion('system-health')}
-          >
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={3}>
-                <Card sx={{ textAlign: 'center', p: 2 }}>
-                  <Typography variant="h6" color="success.main" sx={{ fontWeight: 700 }}>
-                    Online
+        {/* Recent Scans */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                Recent Scans
+              </Typography>
+              {scansLoading ? (
+                <Box>
+                  {[1, 2, 3].map((i) => (
+                    <Box key={i} sx={{ mb: 2 }}>
+                      <Skeleton height={20} />
+                      <Skeleton height={16} width="60%" />
+                    </Box>
+                  ))}
+                </Box>
+              ) : (
+                <Box>
+                  {recentScans?.scans?.slice(0, 5).map((scan: any) => (
+                    <Box key={scan.id} sx={{ mb: 2, p: 2, border: '1px solid #eee', borderRadius: 1 }}>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                        <Typography variant="subtitle2" noWrap>
+                          {scan.name}
+                        </Typography>
+                        <Chip
+                          label={scan.status}
+                          color={getStatusColor(scan.status) as any}
+                          size="small"
+                        />
+                      </Box>
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        {scan.target_id} • {scan.mode} mode
+                      </Typography>
+                      {scan.status === 'running' && (
+                        <LinearProgress
+                          variant="determinate"
+                          value={scan.progress * 100}
+                          sx={{ mt: 1 }}
+                        />
+                      )}
+                    </Box>
+                  ))}
+                </Box>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* AI Insights */}
+        <Grid item xs={12} md={6}>
+          <Card>
+            <CardContent>
+              <Typography variant="h6" gutterBottom>
+                AI Insights
+              </Typography>
+              <Box>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Pattern Detected:</strong> Multiple endpoints with similar response patterns detected.
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Backend Status
+                </Alert>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Anomaly:</strong> Unusual response times detected in authentication endpoints.
                   </Typography>
-                </Card>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Card sx={{ textAlign: 'center', p: 2 }}>
-                  <Typography variant="h6" color="success.main" sx={{ fontWeight: 700 }}>
-                    {data.scans.filter(s => s.status === 'running').length}
+                </Alert>
+                <Alert severity="success">
+                  <Typography variant="body2">
+                    <strong>Recommendation:</strong> Consider enabling advanced evasion techniques for stealth scanning.
                   </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Active Scans
-                  </Typography>
-                </Card>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Card sx={{ textAlign: 'center', p: 2 }}>
-                  <Typography variant="h6" color="info.main" sx={{ fontWeight: 700 }}>
-                    {data.sessions.filter(s => s.status === 'active').length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Active Sessions
-                  </Typography>
-                </Card>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Card sx={{ textAlign: 'center', p: 2 }}>
-                  <Typography variant="h6" color="primary.main" sx={{ fontWeight: 700 }}>
-                    {data.reports.filter(r => r.status === 'generating').length}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Reports in Progress
-                  </Typography>
-                </Card>
-              </Grid>
-            </Grid>
-          </DashboardWidget>
+                </Alert>
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
     </Box>

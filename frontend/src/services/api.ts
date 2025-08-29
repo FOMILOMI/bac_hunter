@@ -1,24 +1,146 @@
 import axios, { AxiosInstance, AxiosResponse } from 'axios'
 import { toast } from 'react-hot-toast'
 
-// Types for API responses
-interface APIResponse<T> {
-  data: T
-  message?: string
-  success: boolean
+// API Types
+export interface ScanRequest {
+  target: string
+  mode: string
+  max_rps: number
+  phases: string[]
+  identities_config?: Record<string, any>
+  custom_plugins?: string[]
+  timeout_seconds?: number
+  max_concurrency?: number
+  obey_robots?: boolean
+  enable_ai?: boolean
 }
 
-interface PaginatedResponse<T> {
-  items: T[]
-  total: number
-  page: number
-  page_size: number
-  total_pages: number
+export interface Target {
+  id: number
+  base_url: string
+  name?: string
+  description?: string
+  status: string
+  tags?: string[]
+  metadata?: Record<string, any>
+  created_at: string
+  updated_at: string
 }
+
+export interface Scan {
+  id: number
+  target_id: number
+  name: string
+  mode: string
+  status: string
+  progress: number
+  started_at?: string
+  completed_at?: string
+  configuration: Record<string, any>
+  results_summary?: Record<string, any>
+  error_message?: string
+  created_at: string
+  updated_at: string
+  user_id?: string
+}
+
+export interface Finding {
+  id: number
+  target_id: number
+  scan_id?: number
+  type: string
+  url: string
+  evidence: string
+  score: number
+  severity: string
+  status: string
+  created_at: string
+  updated_at: string
+  metadata?: Record<string, any>
+  false_positive: boolean
+  notes?: string
+}
+
+export interface Identity {
+  id: number
+  name: string
+  base_headers?: Record<string, string>
+  cookies?: string
+  auth_bearer?: string
+  role?: string
+  user_id?: string
+  tenant_id?: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface Project {
+  id: number
+  name: string
+  description?: string
+  targets?: number[]
+  configuration?: Record<string, any>
+  created_at: string
+  updated_at: string
+  status: string
+}
+
+export interface Report {
+  id: number
+  name: string
+  type: string
+  content: string
+  generated_at: string
+  scan_id?: number
+  target_id?: number
+  user_id?: string
+  metadata?: Record<string, any>
+}
+
+export interface AIModel {
+  name: string
+  status: string
+  version: string
+}
+
+export interface AIAnalysisRequest {
+  target_id: number
+  analysis_type: string
+  scan_id?: number
+  custom_prompt?: string
+}
+
+export interface ScanLog {
+  id: number
+  scan_id: number
+  level: string
+  message: string
+  timestamp: string
+  metadata?: Record<string, any>
+}
+
+export interface PaginatedResponse<T> {
+  data: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface APIResponse<T = any> {
+  success: boolean
+  data?: T
+  message?: string
+  error?: string
+}
+
+// API Configuration
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const WS_BASE_URL = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8000'
 
 // Create axios instance
 const api: AxiosInstance = axios.create({
-  baseURL: '/api/v2',
+  baseURL: API_BASE_URL,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
@@ -28,7 +150,7 @@ const api: AxiosInstance = axios.create({
 // Request interceptor for authentication
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('authToken')
+    const token = localStorage.getItem('api_token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -46,280 +168,382 @@ api.interceptors.response.use(
   },
   (error) => {
     if (error.response?.status === 401) {
-      // Handle unauthorized access
-      localStorage.removeItem('authToken')
+      localStorage.removeItem('api_token')
       window.location.href = '/login'
     }
+    
+    const message = error.response?.data?.detail || error.message || 'An error occurred'
+    toast.error(message)
+    
     return Promise.reject(error)
   }
 )
 
-// Generic API functions
-const apiService = {
-  get: <T>(url: string, params?: any): Promise<T> =>
-    api.get(url, { params }).then((res) => res.data),
-  
-  post: <T>(url: string, data?: any): Promise<T> =>
-    api.post(url, data).then((res) => res.data),
-  
-  put: <T>(url: string, data?: any): Promise<T> =>
-    api.put(url, data).then((res) => res.data),
-  
-  delete: <T>(url: string): Promise<T> =>
-    api.delete(url).then((res) => res.data),
-  
-  patch: <T>(url: string, data?: any): Promise<T> =>
-    api.patch(url, data).then((res) => res.data),
-}
+// API Service Class
+export class APIService {
+  // Health Check
+  static async healthCheck(): Promise<any> {
+    const response = await api.get('/health')
+    return response.data
+  }
 
-// Projects API
-export const projectsAPI = {
-  getAll: () => apiService.get<{ projects: any[] }>('/projects'),
-  getById: (id: string) => apiService.get<any>(`/projects/${id}`),
-  create: (data: any) => apiService.post<any>('/projects', data),
-  update: (id: string, data: any) => apiService.put<any>(`/projects/${id}`, data),
-  delete: (id: string) => apiService.delete<any>(`/projects/${id}`),
-  export: (id: string, format: string) => apiService.get<any>(`/projects/${id}/export`, { format }),
-  import: (data: any) => apiService.post<any>('/projects/import', data),
-}
+  // Target Management
+  static async listTargets(params?: {
+    limit?: number
+    offset?: number
+    status?: string
+    search?: string
+  }): Promise<PaginatedResponse<Target>> {
+    const response = await api.get('/api/targets', { params })
+    return response.data
+  }
 
-// Scans API
-export const scansAPI = {
-  getAll: () => apiService.get<{ scans: any[] }>('/scans'),
-  getById: (id: string) => apiService.get<any>(`/scans/${id}`),
-  create: (data: any) => apiService.post<any>('/scans', data),
-  update: (id: string, data: any) => apiService.put<any>(`/scans/${id}`, data),
-  delete: (id: string) => apiService.delete<any>(`/scans/${id}`),
-  start: (id: string) => apiService.post<any>(`/scans/${id}/start`),
-  stop: (id: string) => apiService.post<any>(`/scans/${id}/stop`),
-  pause: (id: string) => apiService.post<any>(`/scans/${id}/pause`),
-  resume: (id: string) => apiService.post<any>(`/scans/${id}/resume`),
-  getProgress: (id: string) => apiService.get<any>(`/scans/${id}/progress`),
-  getLogs: (id: string) => apiService.get<any>(`/scans/${id}/logs`),
-  getMetrics: (id: string) => apiService.get<any>(`/scans/${id}/metrics`),
-}
+  static async createTarget(target: Omit<Target, 'id' | 'created_at' | 'updated_at'>): Promise<{ id: number; message: string }> {
+    const response = await api.post('/api/targets', target)
+    return response.data
+  }
 
-// Findings API
-export const findingsAPI = {
-  getAll: () => apiService.get<{ findings: any[] }>('/findings'),
-  getById: (id: string) => apiService.get<any>(`/findings/${id}`),
-  create: (data: any) => apiService.post<any>('/findings', data),
-  update: (id: string, data: any) => apiService.put<any>(`/findings/${id}`, data),
-  delete: (id: string) => apiService.delete<any>(`/findings/${id}`),
-  updateStatus: (findingId: string, status: string) => 
-    apiService.patch<any>(`/findings/${findingId}/status`, { status }),
-  getByProject: (projectId: string) => apiService.get<any>(`/projects/${projectId}/findings`),
-  getByScan: (scanId: string) => apiService.get<any>(`/scans/${scanId}/findings`),
-  export: (filters?: any) => apiService.get<any>('/findings/export', filters),
-}
+  static async getTarget(targetId: number): Promise<Target> {
+    const response = await api.get(`/api/targets/${targetId}`)
+    return response.data
+  }
 
-// AI Insights API
-export const aiInsightsAPI = {
-  getAll: () => apiService.get<{ insights: any[] }>('/ai-insights'),
-  getById: (id: string) => apiService.get<any>(`/ai-insights/${id}`),
-  create: (data: any) => apiService.post<any>('/ai-insights', data),
-  update: (id: string, data: any) => apiService.put<any>(`/ai-insights/${id}`, data),
-  delete: (id: string) => apiService.delete<any>(`/ai-insights/${id}`),
-  updateFeedback: (insightId: string, feedback: any) => 
-    apiService.patch<any>(`/ai-insights/${insightId}/feedback`, feedback),
-  getByProject: (projectId: string) => apiService.get<any>(`/projects/${projectId}/ai-insights`),
-  getByScan: (scanId: string) => apiService.get<any>(`/scans/${scanId}/ai-insights`),
-  generate: (data: any) => apiService.post<any>('/ai-insights/generate', data),
-}
+  static async updateTarget(targetId: number, target: Partial<Target>): Promise<{ message: string }> {
+    const response = await api.put(`/api/targets/${targetId}`, target)
+    return response.data
+  }
 
-// Reports API
-export const reportsAPI = {
-  getAll: () => apiService.get<{ reports: any[] }>('/reports'),
-  getById: (id: string) => apiService.get<any>(`/reports/${id}`),
-  generate: (data: any) => apiService.post<any>('/reports/generate', data),
-  update: (id: string, data: any) => apiService.put<any>(`/reports/${id}`, data),
-  delete: (id: string) => apiService.delete<any>(`/reports/${id}`),
-  download: (id: string, format: string) => apiService.get<any>(`/reports/${id}/download`, { format }),
-  getTemplates: () => apiService.get<any>('/reports/templates'),
-  saveTemplate: (data: any) => apiService.post<any>('/reports/templates', data),
-}
+  static async deleteTarget(targetId: number): Promise<{ message: string }> {
+    const response = await api.delete(`/api/targets/${targetId}`)
+    return response.data
+  }
 
-// Sessions API
-export const sessionsAPI = {
-  getAll: () => apiService.get<{ sessions: any[] }>('/sessions'),
-  getById: (id: string) => apiService.get<any>(`/sessions/${id}`),
-  create: (data: any) => apiService.post<any>('/sessions', data),
-  update: (id: string, data: any) => apiService.put<any>(`/sessions/${id}`, data),
-  delete: (id: string) => apiService.delete<any>(`/sessions/${id}`),
-  replay: (id: string) => apiService.post<any>(`/sessions/${id}/replay`),
-  export: (id: string, format: string) => apiService.get<any>(`/sessions/${id}/export`, { format }),
-  import: (data: any) => apiService.post<any>('/sessions/import', data),
-  getVisualization: (id: string) => apiService.get<any>(`/sessions/${id}/visualization`),
-}
+  // Scan Management
+  static async listScans(params?: {
+    limit?: number
+    offset?: number
+    status?: string
+    target_id?: number
+  }): Promise<PaginatedResponse<Scan>> {
+    const response = await api.get('/api/scans', { params })
+    return response.data
+  }
 
-// API Testing API
-export const apiTestingAPI = {
-  execute: (request: any) => apiService.post<any>('/api-testing/execute', request),
-  getHistory: () => apiService.get<{ history: any[] }>('/api-testing/history'),
-  saveTemplate: (template: any) => apiService.post<any>('/api-testing/templates', template),
-  getTemplates: () => apiService.get<any>('/api-testing/templates'),
-  deleteTemplate: (id: string) => apiService.delete<any>(`/api-testing/templates/${id}`),
-  getConfiguration: () => apiService.get<any>('/api-testing/configuration'),
-  updateConfiguration: (config: any) => apiService.put<any>('/api-testing/configuration', config),
-}
+  static async createScan(scan: ScanRequest): Promise<{ scan_id: number; message: string; status: string }> {
+    const response = await api.post('/api/scans', scan)
+    return response.data
+  }
 
-// Dashboard API
-export const dashboardAPI = {
-  getOverview: () => apiService.get<any>('/dashboard/overview'),
-  getStats: () => apiService.get<any>('/dashboard/stats'),
-  getActivity: () => apiService.get<any>('/dashboard/activity'),
-  getMetrics: () => apiService.get<any>('/dashboard/metrics'),
-  getRecentActivity: () => apiService.get<any>('/dashboard/recent-activity'),
-}
+  static async getScan(scanId: number): Promise<Scan> {
+    const response = await api.get(`/api/scans/${scanId}`)
+    return response.data
+  }
 
-// Statistics API
-export const statsAPI = {
-  getProjectStats: () => apiService.get<any>('/stats/projects'),
-  getScanStats: () => apiService.get<any>('/stats/scans'),
-  getFindingStats: () => apiService.get<any>('/stats/findings'),
-  getInsightStats: () => apiService.get<any>('/stats/insights'),
-  getReportStats: () => apiService.get<any>('/stats/reports'),
-  getSessionStats: () => apiService.get<any>('/stats/sessions'),
-  getOverallStats: () => apiService.get<any>('/stats/overall'),
-}
+  static async startScan(scanId: number): Promise<{ message: string }> {
+    const response = await api.post(`/api/scans/${scanId}/start`)
+    return response.data
+  }
 
-// Export API
-export const exportAPI = {
-  exportProjects: (filters?: any) => apiService.get<any>('/export/projects', filters),
-  exportScans: (filters?: any) => apiService.get<any>('/export/scans', filters),
-  exportFindings: (filters?: any) => apiService.get<any>('/export/findings', filters),
-  exportInsights: (filters?: any) => apiService.get<any>('/export/insights', filters),
-  exportReports: (filters?: any) => apiService.get<any>('/export/reports', filters),
-  exportSessions: (filters?: any) => apiService.get<any>('/export/sessions', filters),
-  exportAll: (filters?: any) => apiService.get<any>('/export/all', filters),
-}
+  static async stopScan(scanId: number): Promise<{ message: string }> {
+    const response = await api.post(`/api/scans/${scanId}/stop`)
+    return response.data
+  }
 
-// Configuration API
-export const configAPI = {
-  getSystemConfig: () => apiService.get<any>('/config/system'),
-  updateSystemConfig: (config: any) => apiService.put<any>('/config/system', config),
-  getUserConfig: () => apiService.get<any>('/config/user'),
-  updateUserConfig: (config: any) => apiService.put<any>('/config/user', config),
-  getScanConfig: () => apiService.get<any>('/config/scan'),
-  updateScanConfig: (config: any) => apiService.put<any>('/config/scan', config),
-  getSecurityConfig: () => apiService.get<any>('/config/security'),
-  updateSecurityConfig: (config: any) => apiService.put<any>('/config/security', config),
-}
+  static async getScanProgress(scanId: number): Promise<{ scan_id: number; progress: number; status: string }> {
+    const response = await api.get(`/api/scans/${scanId}/progress`)
+    return response.data
+  }
 
-// Learning & AI API
-export const learningAPI = {
-  getRecommendations: (context: any) => apiService.post<any>('/learning/recommendations', context),
-  getBestPractices: () => apiService.get<any>('/learning/best-practices'),
-  getTutorials: () => apiService.get<any>('/learning/tutorials'),
-  getTutorial: (id: string) => apiService.get<any>(`/learning/tutorials/${id}`),
-  submitFeedback: (data: any) => apiService.post<any>('/learning/feedback', data),
-  getLearningPath: (userId: string) => apiService.get<any>(`/learning/paths/${userId}`),
-  updateProgress: (userId: string, progress: any) => 
-    apiService.patch<any>(`/learning/paths/${userId}/progress`, progress),
-}
+  static async getScanLogs(scanId: number, params?: {
+    level?: string
+    limit?: number
+  }): Promise<{ logs: ScanLog[] }> {
+    const response = await api.get(`/api/scans/${scanId}/logs`, { params })
+    return response.data
+  }
 
-// Authentication API
-export const authAPI = {
-  login: (credentials: any) => apiService.post<any>('/auth/login', credentials),
-  logout: () => apiService.post<any>('/auth/logout'),
-  refresh: () => apiService.post<any>('/auth/refresh'),
-  register: (userData: any) => apiService.post<any>('/auth/register', userData),
-  forgotPassword: (email: string) => apiService.post<any>('/auth/forgot-password', { email }),
-  resetPassword: (token: string, password: string) => 
-    apiService.post<any>('/auth/reset-password', { token, password }),
-  changePassword: (currentPassword: string, newPassword: string) => 
-    apiService.post<any>('/auth/change-password', { currentPassword, newPassword }),
-  getProfile: () => apiService.get<any>('/auth/profile'),
-  updateProfile: (profile: any) => apiService.put<any>('/auth/profile', profile),
-}
+  // Findings Management
+  static async listFindings(params?: {
+    limit?: number
+    offset?: number
+    severity?: string
+    status?: string
+    target_id?: number
+    scan_id?: number
+  }): Promise<PaginatedResponse<Finding>> {
+    const response = await api.get('/api/findings', { params })
+    return response.data
+  }
 
-// File Upload API
-export const uploadAPI = {
-  uploadFile: (file: File, type: string) => {
+  static async getFinding(findingId: number): Promise<Finding> {
+    const response = await api.get(`/api/findings/${findingId}`)
+    return response.data
+  }
+
+  static async updateFinding(findingId: number, finding: Partial<Finding>): Promise<{ message: string }> {
+    const response = await api.put(`/api/findings/${findingId}`, finding)
+    return response.data
+  }
+
+  // Identity Management
+  static async listIdentities(): Promise<Identity[]> {
+    const response = await api.get('/api/identities')
+    return response.data
+  }
+
+  static async createIdentity(identity: Omit<Identity, 'id' | 'created_at' | 'updated_at'>): Promise<{ id: number; message: string }> {
+    const response = await api.post('/api/identities', identity)
+    return response.data
+  }
+
+  static async updateIdentity(identityId: number, identity: Partial<Identity>): Promise<{ message: string }> {
+    const response = await api.put(`/api/identities/${identityId}`, identity)
+    return response.data
+  }
+
+  static async deleteIdentity(identityId: number): Promise<{ message: string }> {
+    const response = await api.delete(`/api/identities/${identityId}`)
+    return response.data
+  }
+
+  // Project Management
+  static async listProjects(): Promise<Project[]> {
+    const response = await api.get('/api/projects')
+    return response.data
+  }
+
+  static async createProject(project: Omit<Project, 'id' | 'created_at' | 'updated_at'>): Promise<{ id: number; message: string }> {
+    const response = await api.post('/api/projects', project)
+    return response.data
+  }
+
+  static async getProject(projectId: number): Promise<Project> {
+    const response = await api.get(`/api/projects/${projectId}`)
+    return response.data
+  }
+
+  static async updateProject(projectId: number, project: Partial<Project>): Promise<{ message: string }> {
+    const response = await api.put(`/api/projects/${projectId}`, project)
+    return response.data
+  }
+
+  static async deleteProject(projectId: number): Promise<{ message: string }> {
+    const response = await api.delete(`/api/projects/${projectId}`)
+    return response.data
+  }
+
+  // Report Management
+  static async listReports(params?: {
+    limit?: number
+    offset?: number
+    type?: string
+  }): Promise<PaginatedResponse<Report>> {
+    const response = await api.get('/api/reports', { params })
+    return response.data
+  }
+
+  static async generateReport(report: Omit<Report, 'id' | 'generated_at'>): Promise<{ report_id: string; message: string; status: string }> {
+    const response = await api.post('/api/reports/generate', report)
+    return response.data
+  }
+
+  static async downloadReport(reportId: string): Promise<Blob> {
+    const response = await api.get(`/api/reports/${reportId}`, {
+      responseType: 'blob'
+    })
+    return response.data
+  }
+
+  // AI and Intelligence
+  static async listAIModels(): Promise<{ models: AIModel[] }> {
+    const response = await api.get('/api/ai/models')
+    return response.data
+  }
+
+  static async triggerAIAnalysis(request: AIAnalysisRequest): Promise<{ analysis_id: string; message: string; status: string }> {
+    const response = await api.post('/api/ai/analyze', request)
+    return response.data
+  }
+
+  static async getAIPredictions(params?: {
+    target_id?: number
+    model_name?: string
+    limit?: number
+  }): Promise<{ predictions: any[]; total: number }> {
+    const response = await api.get('/api/ai/predictions', { params })
+    return response.data
+  }
+
+  // CLI Integration
+  static async cliScan(scanRequest: ScanRequest): Promise<{ message: string; scan_id: string; status: string }> {
+    const response = await api.post('/api/cli/scan', scanRequest)
+    return response.data
+  }
+
+  static async cliAudit(target: string, mode: string = 'standard'): Promise<{ message: string; audit_id: string; status: string }> {
+    const response = await api.post('/api/cli/audit', { target, mode })
+    return response.data
+  }
+
+  static async cliExploit(target: string, vulnerabilities: string[]): Promise<{ message: string; exploit_id: string; status: string }> {
+    const response = await api.post('/api/cli/exploit', { target, vulnerabilities })
+    return response.data
+  }
+
+  // Statistics
+  static async getOverviewStats(): Promise<any> {
+    const response = await api.get('/api/stats/overview')
+    return response.data
+  }
+
+  static async getTargetStats(): Promise<{ targets: any[]; total: number }> {
+    const response = await api.get('/api/stats/targets')
+    return response.data
+  }
+
+  static async getFindingStats(): Promise<{ findings: any[]; total: number }> {
+    const response = await api.get('/api/stats/findings')
+    return response.data
+  }
+
+  // Session Management
+  static async listSessions(): Promise<any[]> {
+    const response = await api.get('/api/sessions')
+    return response.data
+  }
+
+  static async createSession(session: any): Promise<{ id: number; message: string }> {
+    const response = await api.post('/api/sessions', session)
+    return response.data
+  }
+
+  static async getSession(sessionId: number): Promise<any> {
+    const response = await api.get(`/api/sessions/${sessionId}`)
+    return response.data
+  }
+
+  static async deleteSession(sessionId: number): Promise<{ message: string }> {
+    const response = await api.delete(`/api/sessions/${sessionId}`)
+    return response.data
+  }
+
+  // File Upload
+  static async uploadFile(file: File, type: string): Promise<{ message: string; file_id: string }> {
     const formData = new FormData()
     formData.append('file', file)
     formData.append('type', type)
-    return apiService.post<any>('/upload/file', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    })
-  },
-  uploadMultiple: (files: File[], type: string) => {
-    const formData = new FormData()
-    files.forEach((file) => formData.append('files', file))
-    formData.append('type', type)
-    return apiService.post<any>('/upload/multiple', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    })
-  },
-  getUploadProgress: (uploadId: string) => apiService.get<any>(`/upload/progress/${uploadId}`),
-  cancelUpload: (uploadId: string) => apiService.delete<any>(`/upload/${uploadId}`),
-}
-
-// WebSocket API (for real-time updates)
-export const websocketAPI = {
-  connect: (token?: string) => {
-    // WebSocket connection logic would go here
-    // This is a placeholder for the actual implementation
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.host
-    const url = `${protocol}//${host}/ws${token ? `?token=${token}` : ''}`
-    return new WebSocket(url)
-  },
-  subscribe: (channel: string) => {
-    // Subscription logic would go here
-  },
-  unsubscribe: (channel: string) => {
-    // Unsubscription logic would go here
-  },
-}
-
-// WebSocket connection helper function
-export const createWebSocketConnection = (token?: string) => {
-  return websocketAPI.connect(token)
-}
-
-// Utility functions
-export const apiUtils = {
-  handleError: (error: any) => {
-    const message = error.response?.data?.message || error.message || 'An error occurred'
-    toast.error(message)
-    return Promise.reject(error)
-  },
-  
-  downloadFile: (url: string, filename: string) => {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  },
-  
-  formatFileSize: (bytes: number): string => {
-    if (bytes === 0) return '0 Bytes'
-    const k = 1024
-    const sizes = ['Bytes', 'KB', 'MB', 'GB']
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
-  },
-  
-  formatDuration: (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600)
-    const minutes = Math.floor((seconds % 3600) / 60)
-    const secs = seconds % 60
     
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${secs}s`
-    } else if (minutes > 0) {
-      return `${minutes}m ${secs}s`
-    } else {
-      return `${secs}s`
-    }
-  },
+    const response = await api.post('/api/upload/file', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+    return response.data
+  }
+
+  static async uploadMultipleFiles(files: File[], type: string): Promise<{ message: string; file_ids: string[] }> {
+    const formData = new FormData()
+    files.forEach((file, index) => {
+      formData.append(`files`, file)
+    })
+    formData.append('type', type)
+    
+    const response = await api.post('/api/upload/multiple', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+    return response.data
+  }
+
+  // Export
+  static async exportData(format: string, filters?: Record<string, any>): Promise<Blob> {
+    const response = await api.get(`/api/export`, {
+      params: { format, ...filters },
+      responseType: 'blob'
+    })
+    return response.data
+  }
 }
 
-export default api
+// WebSocket Service
+export class WebSocketService {
+  private ws: WebSocket | null = null
+  private reconnectAttempts = 0
+  private maxReconnectAttempts = 5
+  private reconnectDelay = 1000
+
+  constructor(private url: string, private onMessage?: (data: any) => void) {}
+
+  connect(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        this.ws = new WebSocket(this.url)
+        
+        this.ws.onopen = () => {
+          console.log('WebSocket connected')
+          this.reconnectAttempts = 0
+          resolve()
+        }
+        
+        this.ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data)
+            if (this.onMessage) {
+              this.onMessage(data)
+            }
+          } catch (error) {
+            console.error('Failed to parse WebSocket message:', error)
+          }
+        }
+        
+        this.ws.onclose = () => {
+          console.log('WebSocket disconnected')
+          this.attemptReconnect()
+        }
+        
+        this.ws.onerror = (error) => {
+          console.error('WebSocket error:', error)
+          reject(error)
+        }
+      } catch (error) {
+        reject(error)
+      }
+    })
+  }
+
+  private attemptReconnect(): void {
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++
+      console.log(`Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`)
+      
+      setTimeout(() => {
+        this.connect().catch(console.error)
+      }, this.reconnectDelay * this.reconnectAttempts)
+    } else {
+      console.error('Max reconnection attempts reached')
+    }
+  }
+
+  disconnect(): void {
+    if (this.ws) {
+      this.ws.close()
+      this.ws = null
+    }
+  }
+
+  send(data: any): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data))
+    }
+  }
+}
+
+// Create WebSocket instances
+export const scanWebSocket = (scanId: number) => 
+  new WebSocketService(`${WS_BASE_URL}/ws/scans/${scanId}`)
+
+export const systemWebSocket = () => 
+  new WebSocketService(`${WS_BASE_URL}/ws/system`)
+
+export default APIService

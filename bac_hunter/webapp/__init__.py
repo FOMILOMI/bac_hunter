@@ -1,10 +1,14 @@
 try:
-    from .enhanced_server import app as enhanced_app
-    app = enhanced_app
+    from .enterprise_api import app as enterprise_app
+    app = enterprise_app
 except ImportError:
     try:
-        from .server import app
+        from .enhanced_server import app as enhanced_app
+        app = enhanced_app
     except ImportError:
-        from webapp.server import app
+        try:
+            from .server import app
+        except ImportError:
+            from webapp.server import app
 
 __all__ = ["app"]

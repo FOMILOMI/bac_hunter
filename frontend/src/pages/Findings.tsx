@@ -1,85 +1,76 @@
 import React, { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box,
-  Typography,
-  Button,
+  Grid,
   Card,
   CardContent,
-  Grid,
+  Typography,
+  Button,
   TextField,
-  InputAdornment,
-  Chip,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  Switch,
-  FormControlLabel,
+  Chip,
+  IconButton,
+  Tooltip,
   Alert,
   Skeleton,
-  Tooltip,
-  Menu,
-  ListItemIcon,
-  ListItemText,
-  Divider,
-  Tabs,
-  Tab,
-  useTheme,
-  alpha,
-  LinearProgress,
-  Badge,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControlLabel,
+  Switch,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  TablePagination,
   Paper,
+  Tabs,
+  Tab,
+  Badge,
+  Rating,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  Collapse,
 } from '@mui/material'
 import {
-  Add as AddIcon,
-  Search as SearchIcon,
-  FilterList as FilterIcon,
-  MoreVert as MoreIcon,
-  BugReport as FindingIcon,
+  BugReport as BugIcon,
   Security as SecurityIcon,
-  TrendingUp as TrendIcon,
-  Warning as WarningIcon,
-  CheckCircle as SuccessIcon,
-  Error as ErrorIcon,
-  Info as InfoIcon,
+  Psychology as AIIcon,
+  FilterList as FilterIcon,
+  Search as SearchIcon,
   Visibility as ViewIcon,
   Edit as EditIcon,
   Delete as DeleteIcon,
-  Download as ExportIcon,
-  Upload as ImportIcon,
-  Refresh as RefreshIcon,
-  Assessment as ReportIcon,
+  Download as DownloadIcon,
+  ExpandMore as ExpandMoreIcon,
+  Warning as WarningIcon,
+  Error as ErrorIcon,
+  Info as InfoIcon,
+  CheckCircle as CheckIcon,
   Timeline as TimelineIcon,
-  Speed as SpeedIcon,
-  CheckCircle as ResolvedIcon,
-  Cancel as FalsePositiveIcon,
-  Schedule as InProgressIcon,
+  Assessment as AssessmentIcon,
+  Code as CodeIcon,
+  Link as LinkIcon,
+  Description as DescriptionIcon,
+  Flag as FlagIcon,
 } from '@mui/icons-material'
-import { motion, AnimatePresence } from 'framer-motion'
-import toast from 'react-hot-toast'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'react-hot-toast'
 
-import { findingsAPI } from '../services/api'
-import { Finding, Project, Scan } from '../types'
-import FindingCard from '../components/findings/FindingCard'
-import FindingForm from '../components/findings/FindingForm'
-import FindingFilters from '../components/findings/FindingFilters'
-import FindingStats from '../components/findings/FindingStats'
-import FindingDetails from '../components/findings/FindingDetails'
-import FindingTimeline from '../components/findings/FindingTimeline'
-import FindingExport from '../components/findings/FindingExport'
+import APIService, { Finding } from '../services/api'
+import { useWebSocketStore } from '../store/webSocketStore'
+import StatusIndicator from '../components/StatusIndicator'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -98,146 +89,143 @@ function TabPanel(props: TabPanelProps) {
       aria-labelledby={`findings-tab-${index}`}
       {...other}
     >
-      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
     </div>
   )
 }
 
 const Findings: React.FC = () => {
-  const theme = useTheme()
-  const queryClient = useQueryClient()
   const [tabValue, setTabValue] = useState(0)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [severityFilter, setSeverityFilter] = useState<string[]>([])
-  const [statusFilter, setStatusFilter] = useState<string[]>([])
-  const [typeFilter, setTypeFilter] = useState<string[]>([])
-  const [projectFilter, setProjectFilter] = useState<string[]>([])
-  const [scanFilter, setScanFilter] = useState<string[]>([])
-  const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [showDetailsDialog, setShowDetailsDialog] = useState(false)
-  const [showExportDialog, setShowExportDialog] = useState(false)
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null)
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'table'>('grid')
-  const [page, setPage] = useState(0)
-  const [rowsPerPage, setRowsPerPage] = useState(25)
-  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [filters, setFilters] = useState({
+    severity: '',
+    status: '',
+    type: '',
+    search: '',
+    target_id: '',
+  })
+  const [expandedFilters, setExpandedFilters] = useState(false)
 
-  // Fetch findings with auto-refresh
-  const {
-    data: findingsData,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery(['findings'], findingsAPI.getAll, {
-    refetchInterval: autoRefresh ? 10000 : false, // Refresh every 10 seconds if enabled
+  const { connected } = useWebSocketStore()
+  const queryClient = useQueryClient()
+
+  // Fetch findings data
+  const { data: findingsData, isLoading: findingsLoading, error: findingsError } = useQuery({
+    queryKey: ['findings', filters],
+    queryFn: () => APIService.listFindings({
+      limit: 100,
+      severity: filters.severity || undefined,
+      status: filters.status || undefined,
+      target_id: filters.target_id ? parseInt(filters.target_id) : undefined,
+    }),
+    refetchInterval: 30000, // Refresh every 30 seconds
   })
 
-  const findings = findingsData?.findings || []
+  const { data: targetsData, isLoading: targetsLoading } = useQuery({
+    queryKey: ['targets'],
+    queryFn: () => APIService.listTargets({ limit: 100 }),
+  })
 
-  // Update finding status mutations
-  const updateStatusMutation = useMutation(findingsAPI.updateStatus, {
+  // Update finding mutation
+  const updateFindingMutation = useMutation({
+    mutationFn: ({ findingId, updates }: { findingId: number; updates: Partial<Finding> }) =>
+      APIService.updateFinding(findingId, updates),
     onSuccess: () => {
-      queryClient.invalidateQueries(['findings'])
-      toast.success('Finding status updated successfully!')
+      toast.success('Finding updated successfully')
+      queryClient.invalidateQueries({ queryKey: ['findings'] })
     },
-    onError: (error: any) => {
-      toast.error(`Failed to update finding status: ${error.message}`)
-    },
-  })
-
-  // Delete finding mutation
-  const deleteFindingMutation = useMutation(findingsAPI.delete, {
-    onSuccess: () => {
-      queryClient.invalidateQueries(['findings'])
-      toast.success('Finding deleted successfully!')
-    },
-    onError: (error: any) => {
-      toast.error(`Failed to delete finding: ${error.message}`)
+    onError: () => {
+      toast.error('Failed to update finding')
     },
   })
-
-  // Filter findings based on search and filters
-  const filteredFindings = findings.filter((finding) => {
-    const matchesSearch = finding.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         finding.description?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         finding.parameter?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         finding.url?.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    const matchesSeverity = severityFilter.length === 0 || severityFilter.includes(finding.severity)
-    const matchesStatus = statusFilter.length === 0 || statusFilter.includes(finding.status)
-    const matchesType = typeFilter.length === 0 || typeFilter.includes(finding.type)
-    const matchesProject = projectFilter.length === 0 || projectFilter.includes(finding.project_id)
-    const matchesScan = scanFilter.length === 0 || projectFilter.includes(finding.scan_id)
-    
-    return matchesSearch && matchesSeverity && matchesStatus && matchesType && matchesProject && matchesScan
-  })
-
-  // Group findings by severity
-  const findingsBySeverity = {
-    critical: filteredFindings.filter(f => f.severity === 'critical'),
-    high: filteredFindings.filter(f => f.severity === 'high'),
-    medium: filteredFindings.filter(f => f.severity === 'medium'),
-    low: filteredFindings.filter(f => f.severity === 'low'),
-    info: filteredFindings.filter(f => f.severity === 'info'),
-  }
-
-  // Group findings by status
-  const findingsByStatus = {
-    open: filteredFindings.filter(f => f.status === 'open'),
-    in_progress: filteredFindings.filter(f => f.status === 'in_progress'),
-    resolved: filteredFindings.filter(f => f.status === 'resolved'),
-    false_positive: filteredFindings.filter(f => f.status === 'false_positive'),
-    duplicate: filteredFindings.filter(f => f.status === 'duplicate'),
-  }
-
-  const handleCreateFinding = (findingData: any) => {
-    // Implementation for creating new findings
-    toast.success('Finding created successfully!')
-    setShowCreateDialog(false)
-  }
-
-  const handleUpdateStatus = (findingId: string, status: string) => {
-    updateStatusMutation.mutate({ findingId, status })
-  }
-
-  const handleDeleteFinding = (findingId: string) => {
-    if (window.confirm('Are you sure you want to delete this finding? This action cannot be undone.')) {
-      deleteFindingMutation.mutate(findingId)
-    }
-  }
-
-  const handleViewDetails = (finding: Finding) => {
-    setSelectedFinding(finding)
-    setShowDetailsDialog(true)
-  }
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue)
   }
 
-  const toggleAutoRefresh = () => {
-    setAutoRefresh(!autoRefresh)
-    if (!autoRefresh) {
-      refetch()
+  const handleFilterChange = (key: string, value: string) => {
+    setFilters(prev => ({ ...prev, [key]: value }))
+  }
+
+  const handleUpdateFinding = (findingId: number, updates: Partial<Finding>) => {
+    updateFindingMutation.mutate({ findingId, updates })
+  }
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity.toLowerCase()) {
+      case 'critical': return 'error'
+      case 'high': return 'error'
+      case 'medium': return 'warning'
+      case 'low': return 'info'
+      case 'info': return 'default'
+      default: return 'default'
     }
   }
 
-  const handleChangePage = (event: unknown, newPage: number) => {
-    setPage(newPage)
+  const getSeverityIcon = (severity: string) => {
+    switch (severity.toLowerCase()) {
+      case 'critical': return <ErrorIcon />
+      case 'high': return <WarningIcon />
+      case 'medium': return <WarningIcon />
+      case 'low': return <InfoIcon />
+      case 'info': return <InfoIcon />
+      default: return <InfoIcon />
+    }
   }
 
-  const handleChangeRowsPerPage = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setRowsPerPage(parseInt(event.target.value, 10))
-    setPage(0)
+  const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case 'open': return 'error'
+      case 'investigating': return 'warning'
+      case 'resolved': return 'success'
+      case 'false_positive': return 'default'
+      default: return 'default'
+    }
   }
 
-  if (error) {
+  const getTypeIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case 'idor': return <SecurityIcon />
+      case 'auth_bypass': return <BugIcon />
+      case 'privilege_escalation': return <SecurityIcon />
+      case 'information_disclosure': return <DescriptionIcon />
+      case 'endpoint': return <LinkIcon />
+      default: return <BugIcon />
+    }
+  }
+
+  const findings = findingsData?.findings || []
+  const targets = targetsData?.targets || []
+
+  // Filter findings based on search
+  const filteredFindings = findings.filter(finding => {
+    if (filters.search) {
+      const searchLower = filters.search.toLowerCase()
+      return (
+        finding.url.toLowerCase().includes(searchLower) ||
+        finding.evidence.toLowerCase().includes(searchLower) ||
+        finding.type.toLowerCase().includes(searchLower)
+      )
+    }
+    return true
+  })
+
+  // Group findings by severity
+  const findingsBySeverity = {
+    critical: filteredFindings.filter(f => f.severity.toLowerCase() === 'critical'),
+    high: filteredFindings.filter(f => f.severity.toLowerCase() === 'high'),
+    medium: filteredFindings.filter(f => f.severity.toLowerCase() === 'medium'),
+    low: filteredFindings.filter(f => f.severity.toLowerCase() === 'low'),
+    info: filteredFindings.filter(f => f.severity.toLowerCase() === 'info'),
+  }
+
+  if (findingsError) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to load findings: {(error as any).message}
+        <Alert severity="error" sx={{ mb: 3 }}>
+          Failed to load findings data. Please check your connection and try again.
         </Alert>
-        <Button onClick={() => refetch()} startIcon={<RefreshIcon />}>
+        <Button variant="contained" onClick={() => queryClient.invalidateQueries()}>
           Retry
         </Button>
       </Box>
@@ -245,283 +233,675 @@ const Findings: React.FC = () => {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', pb: 4 }}>
+    <Box sx={{ p: 3 }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Vulnerability Analysis
+          <Typography variant="h4" component="h1" gutterBottom>
+            Security Findings
           </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Comprehensive findings management and vulnerability assessment
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <StatusIndicator connected={connected} />
+            <Typography variant="body2" color="text.secondary">
+              {connected ? 'Connected to BAC Hunter' : 'Disconnected'}
+            </Typography>
+          </Box>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={autoRefresh}
-                onChange={toggleAutoRefresh}
-                size="small"
-              />
-            }
-            label="Auto-refresh"
-            sx={{ mr: 2 }}
-          />
+        <Box sx={{ display: 'flex', gap: 1 }}>
           <Button
             variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={() => refetch()}
-            disabled={isLoading}
-          >
-            Refresh
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<ExportIcon />}
-            onClick={() => setShowExportDialog(true)}
+            startIcon={<DownloadIcon />}
+            onClick={() => {/* Export findings */}}
           >
             Export
           </Button>
           <Button
             variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setShowCreateDialog(true)}
+            startIcon={<AIIcon />}
+            onClick={() => {/* AI analysis */}}
           >
-            New Finding
+            AI Analysis
           </Button>
         </Box>
       </Box>
 
-      {/* Findings Statistics */}
-      <FindingStats findings={findings} />
-
-      {/* Search and Filters */}
+      {/* Filters */}
       <Card sx={{ mb: 3 }}>
         <CardContent>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                placeholder="Search findings..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-              />
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+            <Typography variant="h6">Filters</Typography>
+            <Button
+              startIcon={<FilterIcon />}
+              onClick={() => setExpandedFilters(!expandedFilters)}
+              size="small"
+            >
+              {expandedFilters ? 'Hide' : 'Show'} Filters
+            </Button>
+          </Box>
+          
+          <Collapse in={expandedFilters}>
+            <Grid container spacing={2}>
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  label="Search"
+                  placeholder="Search findings..."
+                  value={filters.search}
+                  onChange={(e) => handleFilterChange('search', e.target.value)}
+                  InputProps={{
+                    startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />,
+                  }}
+                />
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth>
+                  <InputLabel>Severity</InputLabel>
+                  <Select
+                    value={filters.severity}
+                    label="Severity"
+                    onChange={(e) => handleFilterChange('severity', e.target.value)}
+                  >
+                    <MenuItem value="">All Severities</MenuItem>
+                    <MenuItem value="critical">Critical</MenuItem>
+                    <MenuItem value="high">High</MenuItem>
+                    <MenuItem value="medium">Medium</MenuItem>
+                    <MenuItem value="low">Low</MenuItem>
+                    <MenuItem value="info">Info</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth>
+                  <InputLabel>Status</InputLabel>
+                  <Select
+                    value={filters.status}
+                    label="Status"
+                    onChange={(e) => handleFilterChange('status', e.target.value)}
+                  >
+                    <MenuItem value="">All Statuses</MenuItem>
+                    <MenuItem value="open">Open</MenuItem>
+                    <MenuItem value="investigating">Investigating</MenuItem>
+                    <MenuItem value="resolved">Resolved</MenuItem>
+                    <MenuItem value="false_positive">False Positive</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={3}>
+                <FormControl fullWidth>
+                  <InputLabel>Target</InputLabel>
+                  <Select
+                    value={filters.target_id}
+                    label="Target"
+                    onChange={(e) => handleFilterChange('target_id', e.target.value)}
+                  >
+                    <MenuItem value="">All Targets</MenuItem>
+                    {targets.map((target) => (
+                      <MenuItem key={target.id} value={target.id}>
+                        {target.name || target.base_url}
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+              </Grid>
             </Grid>
-            <Grid item xs={12} md={6}>
-              <FindingFilters
-                severityFilter={severityFilter}
-                setSeverityFilter={setSeverityFilter}
-                statusFilter={statusFilter}
-                setStatusFilter={setStatusFilter}
-                typeFilter={typeFilter}
-                setTypeFilter={setTypeFilter}
-                projectFilter={projectFilter}
-                setProjectFilter={setProjectFilter}
-                scanFilter={scanFilter}
-                setScanFilter={setScanFilter}
-                findings={findings}
-              />
-            </Grid>
-          </Grid>
+          </Collapse>
         </CardContent>
       </Card>
 
+      {/* Statistics Cards */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        <Grid item xs={12} sm={6} md={2}>
+          <Card>
+            <CardContent sx={{ textAlign: 'center' }}>
+              <Typography color="text.secondary" gutterBottom>
+                Total
+              </Typography>
+              <Typography variant="h4" color="primary">
+                {findingsLoading ? <Skeleton width={40} /> : filteredFindings.length}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <Card>
+            <CardContent sx={{ textAlign: 'center' }}>
+              <Typography color="text.secondary" gutterBottom>
+                Critical
+              </Typography>
+              <Typography variant="h4" color="error">
+                {findingsLoading ? <Skeleton width={40} /> : findingsBySeverity.critical.length}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <Card>
+            <CardContent sx={{ textAlign: 'center' }}>
+              <Typography color="text.secondary" gutterBottom>
+                High
+              </Typography>
+              <Typography variant="h4" color="error">
+                {findingsLoading ? <Skeleton width={40} /> : findingsBySeverity.high.length}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <Card>
+            <CardContent sx={{ textAlign: 'center' }}>
+              <Typography color="text.secondary" gutterBottom>
+                Medium
+              </Typography>
+              <Typography variant="h4" color="warning.main">
+                {findingsLoading ? <Skeleton width={40} /> : findingsBySeverity.medium.length}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <Card>
+            <CardContent sx={{ textAlign: 'center' }}>
+              <Typography color="text.secondary" gutterBottom>
+                Low
+              </Typography>
+              <Typography variant="h4" color="info.main">
+                {findingsLoading ? <Skeleton width={40} /> : findingsBySeverity.low.length}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+        <Grid item xs={12} sm={6} md={2}>
+          <Card>
+            <CardContent sx={{ textAlign: 'center' }}>
+              <Typography color="text.secondary" gutterBottom>
+                Info
+              </Typography>
+              <Typography variant="h4" color="text.secondary">
+                {findingsLoading ? <Skeleton width={40} /> : findingsBySeverity.info.length}
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
+
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="findings tabs">
-          <Tab 
-            label={`All Findings (${filteredFindings.length})`} 
-            icon={<FindingIcon />}
-            iconPosition="start"
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={findingsBySeverity.critical.length} color="error">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <ErrorIcon />
-                  Critical
-                </Box>
-              </Badge>
-            }
-            iconPosition="start"
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={findingsBySeverity.high.length} color="warning">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <WarningIcon />
-                  High
-                </Box>
-              </Badge>
-            }
-            iconPosition="start"
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={findingsBySeverity.medium.length} color="info">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <InfoIcon />
-                  Medium
-                </Box>
-              </Badge>
-            }
-            iconPosition="start"
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={findingsByStatus.open.length} color="primary">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <SecurityIcon />
-                  Open
-                </Box>
-              </Badge>
-            }
-            iconPosition="start"
-          />
+        <Tabs value={tabValue} onChange={handleTabChange} aria-label="findings management tabs">
+          <Tab label="All Findings" />
+          <Tab label="Critical & High" />
+          <Tab label="AI Insights" />
+          <Tab label="Reports" />
         </Tabs>
       </Box>
 
       {/* Tab Panels */}
       <TabPanel value={tabValue} index={0}>
-        <FindingGrid
-          findings={filteredFindings}
-          isLoading={isLoading}
-          onUpdateStatus={handleUpdateStatus}
-          onDelete={handleDeleteFinding}
-          onViewDetails={handleViewDetails}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          page={page}
-          rowsPerPage={rowsPerPage}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
+        {/* All Findings */}
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              All Findings ({filteredFindings.length})
+            </Typography>
+            <TableContainer component={Paper} variant="outlined">
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Severity</TableCell>
+                    <TableCell>Type</TableCell>
+                    <TableCell>URL</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Score</TableCell>
+                    <TableCell>Created</TableCell>
+                    <TableCell>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {findingsLoading ? (
+                    Array.from({ length: 5 }).map((_, index) => (
+                      <TableRow key={index}>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                      </TableRow>
+                    ))
+                  ) : filteredFindings.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} sx={{ textAlign: 'center', py: 4 }}>
+                        <Typography variant="body1" color="text.secondary">
+                          No findings found matching your criteria
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredFindings.map((finding) => (
+                      <TableRow key={finding.id} hover>
+                        <TableCell>
+                          <Chip
+                            icon={getSeverityIcon(finding.severity)}
+                            label={finding.severity}
+                            color={getSeverityColor(finding.severity) as any}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                            {getTypeIcon(finding.type)}
+                            <Typography variant="body2">{finding.type}</Typography>
+                          </Box>
+                        </TableCell>
+                        <TableCell>
+                          <Tooltip title={finding.url}>
+                            <Typography variant="body2" noWrap sx={{ maxWidth: 200 }}>
+                              {finding.url}
+                            </Typography>
+                          </Tooltip>
+                        </TableCell>
+                        <TableCell>
+                          <Chip
+                            label={finding.status}
+                            color={getStatusColor(finding.status) as any}
+                            size="small"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Rating
+                            value={Math.ceil(finding.score / 20)}
+                            readOnly
+                            size="small"
+                            max={5}
+                          />
+                          <Typography variant="body2" color="text.secondary">
+                            {finding.score.toFixed(1)}
+                          </Typography>
+                        </TableCell>
+                        <TableCell>
+                          {new Date(finding.created_at).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell>
+                          <Box sx={{ display: 'flex', gap: 1 }}>
+                            <Tooltip title="View Details">
+                              <IconButton size="small" onClick={() => setSelectedFinding(finding)}>
+                                <ViewIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Edit">
+                              <IconButton size="small">
+                                <EditIcon />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title="Mark as False Positive">
+                              <IconButton 
+                                size="small" 
+                                color={finding.false_positive ? "success" : "default"}
+                                onClick={() => handleUpdateFinding(finding.id, { 
+                                  false_positive: !finding.false_positive 
+                                })}
+                              >
+                                <FlagIcon />
+                              </IconButton>
+                            </Tooltip>
+                          </Box>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
       </TabPanel>
 
       <TabPanel value={tabValue} index={1}>
-        <FindingGrid
-          findings={findingsBySeverity.critical}
-          isLoading={isLoading}
-          onUpdateStatus={handleUpdateStatus}
-          onDelete={handleDeleteFinding}
-          onViewDetails={handleViewDetails}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          page={page}
-          rowsPerPage={rowsPerPage}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
+        {/* Critical & High Findings */}
+        <Grid container spacing={3}>
+          {findingsLoading ? (
+            Array.from({ length: 6 }).map((_, index) => (
+              <Grid item xs={12} md={6} key={index}>
+                <Card>
+                  <CardContent>
+                    <Skeleton height={24} width="60%" sx={{ mb: 1 }} />
+                    <Skeleton height={20} width="40%" sx={{ mb: 2 }} />
+                    <Skeleton height={16} width="80%" sx={{ mb: 1 }} />
+                    <Skeleton height={16} width="60%" />
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))
+          ) : (
+            [...findingsBySeverity.critical, ...findingsBySeverity.high].map((finding) => (
+              <Grid item xs={12} md={6} key={finding.id}>
+                <Card>
+                  <CardContent>
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                      <Chip
+                        icon={getSeverityIcon(finding.severity)}
+                        label={finding.severity}
+                        color={getSeverityColor(finding.severity) as any}
+                        size="small"
+                      />
+                      <Chip
+                        label={finding.status}
+                        color={getStatusColor(finding.status) as any}
+                        size="small"
+                        variant="outlined"
+                      />
+                    </Box>
+                    
+                    <Typography variant="h6" gutterBottom>
+                      {finding.type}
+                    </Typography>
+                    
+                    <Typography variant="body2" color="text.secondary" gutterBottom>
+                      {finding.url}
+                    </Typography>
+                    
+                    <Typography variant="body2" sx={{ mb: 2 }}>
+                      {finding.evidence.substring(0, 150)}...
+                    </Typography>
+                    
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Rating
+                        value={Math.ceil(finding.score / 20)}
+                        readOnly
+                        size="small"
+                        max={5}
+                      />
+                      <Typography variant="body2" color="text.secondary">
+                        Score: {finding.score.toFixed(1)}
+                      </Typography>
+                    </Box>
+                    
+                    <Box sx={{ display: 'flex', gap: 1, mt: 2 }}>
+                      <Button
+                        size="small"
+                        startIcon={<ViewIcon />}
+                        onClick={() => setSelectedFinding(finding)}
+                      >
+                        View Details
+                      </Button>
+                      <Button
+                        size="small"
+                        startIcon={<AIIcon />}
+                        onClick={() => {/* AI analysis */}}
+                      >
+                        AI Analysis
+                      </Button>
+                    </Box>
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))
+          )}
+        </Grid>
       </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        <FindingGrid
-          findings={findingsBySeverity.high}
-          isLoading={isLoading}
-          onUpdateStatus={handleUpdateStatus}
-          onDelete={handleDeleteFinding}
-          onViewDetails={handleViewDetails}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          page={page}
-          rowsPerPage={rowsPerPage}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
+        {/* AI Insights */}
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={8}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  AI-Powered Analysis
+                </Typography>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Pattern Detection:</strong> AI has identified similar vulnerability patterns across multiple endpoints.
+                  </Typography>
+                </Alert>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <Typography variant="body2">
+                    <strong>Risk Assessment:</strong> High-risk findings detected in authentication flows.
+                  </Typography>
+                </Alert>
+                <Alert severity="success">
+                  <Typography variant="body2">
+                    <strong>Recommendation:</strong> Consider implementing additional access controls for sensitive endpoints.
+                  </Typography>
+                </Alert>
+              </CardContent>
+            </Card>
+          </Grid>
+          
+          <Grid item xs={12} md={4}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  AI Model Status
+                </Typography>
+                <List dense>
+                  <ListItem>
+                    <ListItemIcon>
+                      <AIIcon color="success" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary="BAC ML Engine"
+                      secondary="Active - 95% accuracy"
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemIcon>
+                      <AIIcon color="success" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary="Anomaly Detector"
+                      secondary="Active - 87% accuracy"
+                    />
+                  </ListItem>
+                  <ListItem>
+                    <ListItemIcon>
+                      <AIIcon color="warning" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary="Pattern Analyzer"
+                      secondary="Training - 73% accuracy"
+                    />
+                  </ListItem>
+                </List>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
       </TabPanel>
 
       <TabPanel value={tabValue} index={3}>
-        <FindingGrid
-          findings={findingsBySeverity.medium}
-          isLoading={isLoading}
-          onUpdateStatus={handleUpdateStatus}
-          onDelete={handleDeleteFinding}
-          onViewDetails={handleViewDetails}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          page={page}
-          rowsPerPage={rowsPerPage}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
+        {/* Reports */}
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Finding Reports
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Executive Summary
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      High-level overview of security posture and critical findings
+                    </Typography>
+                    <Button variant="outlined" startIcon={<DownloadIcon />}>
+                      Generate PDF
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Technical Report
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Detailed technical analysis with remediation steps
+                    </Typography>
+                    <Button variant="outlined" startIcon={<DownloadIcon />}>
+                      Generate HTML
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Compliance Report
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      OWASP Top 10 and industry compliance mapping
+                    </Typography>
+                    <Button variant="outlined" startIcon={<DownloadIcon />}>
+                      Generate Report
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Card variant="outlined">
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom>
+                      Custom Export
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                      Export findings in various formats (CSV, JSON, SARIF)
+                    </Typography>
+                    <Button variant="outlined" startIcon={<DownloadIcon />}>
+                      Export Data
+                    </Button>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
       </TabPanel>
-
-      <TabPanel value={tabValue} index={4}>
-        <FindingGrid
-          findings={findingsByStatus.open}
-          isLoading={isLoading}
-          onUpdateStatus={handleUpdateStatus}
-          onDelete={handleDeleteFinding}
-          onViewDetails={handleViewDetails}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-          page={page}
-          rowsPerPage={rowsPerPage}
-          onPageChange={handleChangePage}
-          onRowsPerPageChange={handleChangeRowsPerPage}
-        />
-      </TabPanel>
-
-      {/* Create Finding Dialog */}
-      <Dialog
-        open={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle>Create New Finding</DialogTitle>
-        <DialogContent>
-          <FindingForm
-            onSubmit={handleCreateFinding}
-            onCancel={() => setShowCreateDialog(false)}
-          />
-        </DialogContent>
-      </Dialog>
 
       {/* Finding Details Dialog */}
-      <Dialog
-        open={showDetailsDialog}
-        onClose={() => setShowDetailsDialog(false)}
-        maxWidth="lg"
-        fullWidth
-        PaperProps={{
-          sx: { height: '90vh' }
-        }}
-      >
-        <DialogTitle>Finding Details - {selectedFinding?.title}</DialogTitle>
-        <DialogContent>
-          {selectedFinding && (
-            <FindingDetails finding={selectedFinding} />
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowDetailsDialog(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Export Dialog */}
-      <Dialog
-        open={showExportDialog}
-        onClose={() => setShowExportDialog(false)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle>Export Findings</DialogTitle>
-        <DialogContent>
-          <FindingExport
-            findings={filteredFindings}
-            onClose={() => setShowExportDialog(false)}
-          />
-        </DialogContent>
-      </Dialog>
+      {selectedFinding && (
+        <Dialog
+          open={!!selectedFinding}
+          onClose={() => setSelectedFinding(null)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              {getTypeIcon(selectedFinding.type)}
+              <Typography variant="h6">
+                {selectedFinding.type} - {selectedFinding.severity} Severity
+              </Typography>
+            </Box>
+          </DialogTitle>
+          <DialogContent>
+            <Grid container spacing={3} sx={{ mt: 1 }}>
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>URL:</strong>
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 2, wordBreak: 'break-all' }}>
+                  {selectedFinding.url}
+                </Typography>
+                
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Status:</strong>
+                </Typography>
+                <Chip
+                  label={selectedFinding.status}
+                  color={getStatusColor(selectedFinding.status) as any}
+                  sx={{ mb: 2 }}
+                />
+                
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Score:</strong>
+                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                  <Rating
+                    value={Math.ceil(selectedFinding.score / 20)}
+                    readOnly
+                    max={5}
+                  />
+                  <Typography variant="body2">
+                    {selectedFinding.score.toFixed(1)}
+                  </Typography>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Created:</strong>
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 2 }}>
+                  {new Date(selectedFinding.created_at).toLocaleString()}
+                </Typography>
+                
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Updated:</strong>
+                </Typography>
+                <Typography variant="body2" sx={{ mb: 2 }}>
+                  {new Date(selectedFinding.updated_at).toLocaleString()}
+                </Typography>
+                
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>False Positive:</strong>
+                </Typography>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={selectedFinding.false_positive}
+                      onChange={(e) => handleUpdateFinding(selectedFinding.id, {
+                        false_positive: e.target.checked
+                      })}
+                    />
+                  }
+                  label="Mark as false positive"
+                />
+              </Grid>
+              
+              <Grid item xs={12}>
+                <Divider sx={{ my: 2 }} />
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Evidence:</strong>
+                </Typography>
+                <Paper variant="outlined" sx={{ p: 2, backgroundColor: 'grey.50' }}>
+                  <Typography variant="body2" fontFamily="monospace">
+                    {selectedFinding.evidence}
+                  </Typography>
+                </Paper>
+              </Grid>
+              
+              {selectedFinding.notes && (
+                <Grid item xs={12}>
+                  <Typography variant="subtitle2" gutterBottom>
+                    <strong>Notes:</strong>
+                  </Typography>
+                  <Typography variant="body2">
+                    {selectedFinding.notes}
+                  </Typography>
+                </Grid>
+              )}
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSelectedFinding(null)}>Close</Button>
+            <Button
+              variant="contained"
+              startIcon={<AIIcon />}
+              onClick={() => {/* AI analysis */}}
+            >
+              AI Analysis
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </Box>
   )
 }

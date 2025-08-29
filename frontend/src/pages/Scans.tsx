@@ -1,76 +1,68 @@
 import React, { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box,
-  Typography,
-  Button,
+  Grid,
   Card,
   CardContent,
-  Grid,
+  Typography,
+  Button,
   TextField,
-  InputAdornment,
-  Chip,
-  IconButton,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
-  Switch,
-  FormControlLabel,
+  Chip,
+  LinearProgress,
+  IconButton,
+  Tooltip,
   Alert,
   Skeleton,
-  Tooltip,
-  Menu,
-  ListItemIcon,
-  ListItemText,
-  Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  FormControlLabel,
+  Switch,
+  Slider,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
   Tabs,
   Tab,
-  useTheme,
-  alpha,
-  LinearProgress,
   Badge,
 } from '@mui/material'
 import {
-  Add as AddIcon,
-  Search as SearchIcon,
-  FilterList as FilterIcon,
-  MoreVert as MoreIcon,
-  PlayArrow as StartIcon,
-  Pause as PauseIcon,
+  PlayArrow as PlayIcon,
   Stop as StopIcon,
+  Pause as PauseIcon,
   Refresh as RefreshIcon,
-  Visibility as ViewIcon,
-  Download as ExportIcon,
+  Add as AddIcon,
   Settings as SettingsIcon,
-  BugReport as FindingIcon,
-  Assessment as ReportIcon,
-  Timeline as TimelineIcon,
-  Speed as SpeedIcon,
+  Psychology as AIIcon,
+  BugReport as BugIcon,
   Security as SecurityIcon,
-  TrendingUp as TrendIcon,
-  Warning as WarningIcon,
-  CheckCircle as SuccessIcon,
-  Error as ErrorIcon,
-  Info as InfoIcon,
+  Speed as SpeedIcon,
+  ExpandMore as ExpandMoreIcon,
+  Visibility as ViewIcon,
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  Download as DownloadIcon,
+  Timeline as TimelineIcon,
+  Assessment as AssessmentIcon,
 } from '@mui/icons-material'
-import { motion, AnimatePresence } from 'framer-motion'
-import toast from 'react-hot-toast'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'react-hot-toast'
 
-import { scansAPI } from '../services/api'
-import { Scan, Project } from '../types'
-import ScanCard from '../components/scans/ScanCard'
-import ScanForm from '../components/scans/ScanForm'
-import ScanFilters from '../components/scans/ScanFilters'
-import ScanStats from '../components/scans/ScanStats'
-import ScanLogs from '../components/scans/ScanLogs'
-import ScanProgress from '../components/scans/ScanProgress'
-import ScanGrid from '../components/scans/ScanGrid'
-import ScanMetrics from '../components/scans/ScanMetrics'
+import APIService, { ScanRequest, Scan } from '../services/api'
+import { useWebSocketStore } from '../store/webSocketStore'
+import StatusIndicator from '../components/StatusIndicator'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -85,179 +77,149 @@ function TabPanel(props: TabPanelProps) {
     <div
       role="tabpanel"
       hidden={value !== index}
-      id={`scans-tabpanel-${index}`}
-      aria-labelledby={`scans-tab-${index}`}
+      id={`scan-tabpanel-${index}`}
+      aria-labelledby={`scan-tab-${index}`}
       {...other}
     >
-      {value === index && <Box sx={{ py: 3 }}>{children}</Box>}
+      {value === index && <Box sx={{ p: 3 }}>{children}</Box>}
     </div>
   )
 }
 
 const Scans: React.FC = () => {
-  const theme = useTheme()
-  const queryClient = useQueryClient()
   const [tabValue, setTabValue] = useState(0)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string[]>([])
-  const [projectFilter, setProjectFilter] = useState<string[]>([])
-  const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [showLogsDialog, setShowLogsDialog] = useState(false)
-  const [showMetricsDialog, setShowMetricsDialog] = useState(false)
+  const [newScanDialog, setNewScanDialog] = useState(false)
   const [selectedScan, setSelectedScan] = useState<Scan | null>(null)
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-  const [autoRefresh, setAutoRefresh] = useState(true)
-
-  // Fetch scans with auto-refresh
-  const {
-    data: scansData,
-    isLoading,
-    error,
-    refetch,
-  } = useQuery(['scans'], scansAPI.getAll, {
-    refetchInterval: autoRefresh ? 5000 : false, // Refresh every 5 seconds if enabled
+  const [scanConfig, setScanConfig] = useState<ScanRequest>({
+    target: '',
+    mode: 'standard',
+    max_rps: 2.0,
+    phases: ['recon', 'access'],
+    enable_ai: true,
   })
 
-  const scans = scansData?.scans || []
+  const { connected, addMessage } = useWebSocketStore()
+  const queryClient = useQueryClient()
 
-  // Create scan mutation
-  const createScanMutation = useMutation(scansAPI.create, {
+  // Fetch scans data
+  const { data: scansData, isLoading: scansLoading, error: scansError } = useQuery({
+    queryKey: ['scans'],
+    queryFn: () => APIService.listScans({ limit: 100 }),
+    refetchInterval: 10000, // Refresh every 10 seconds
+  })
+
+  const { data: targetsData, isLoading: targetsLoading } = useQuery({
+    queryKey: ['targets'],
+    queryFn: () => APIService.listTargets({ limit: 100 }),
+  })
+
+  // Scan mutations
+  const createScanMutation = useMutation({
+    mutationFn: (scan: ScanRequest) => APIService.createScan(scan),
+    onSuccess: (data) => {
+      toast.success(`Scan started: ${data.scan_id}`)
+      setNewScanDialog(false)
+      setScanConfig({
+        target: '',
+        mode: 'standard',
+        max_rps: 2.0,
+        phases: ['recon', 'access'],
+        enable_ai: true,
+      })
+      queryClient.invalidateQueries({ queryKey: ['scans'] })
+    },
+    onError: (error) => {
+      toast.error('Failed to start scan')
+    },
+  })
+
+  const startScanMutation = useMutation({
+    mutationFn: (scanId: number) => APIService.startScan(scanId),
     onSuccess: () => {
-      queryClient.invalidateQueries(['scans'])
-      toast.success('Scan created and started successfully!')
-      setShowCreateDialog(false)
+      toast.success('Scan started successfully')
+      queryClient.invalidateQueries({ queryKey: ['scans'] })
     },
-    onError: (error: any) => {
-      toast.error(`Failed to create scan: ${error.message}`)
+    onError: () => {
+      toast.error('Failed to start scan')
     },
   })
 
-  // Control scan mutations
-  const pauseScanMutation = useMutation(scansAPI.pause, {
+  const stopScanMutation = useMutation({
+    mutationFn: (scanId: number) => APIService.stopScan(scanId),
     onSuccess: () => {
-      queryClient.invalidateQueries(['scans'])
-      toast.success('Scan paused successfully!')
+      toast.success('Scan stopped successfully')
+      queryClient.invalidateQueries({ queryKey: ['scans'] })
     },
-    onError: (error: any) => {
-      toast.error(`Failed to pause scan: ${error.message}`)
-    },
-  })
-
-  const resumeScanMutation = useMutation(scansAPI.resume, {
-    onSuccess: () => {
-      queryClient.invalidateQueries(['scans'])
-      toast.success('Scan resumed successfully!')
-    },
-    onError: (error: any) => {
-      toast.error(`Failed to resume scan: ${error.message}`)
+    onError: () => {
+      toast.error('Failed to stop scan')
     },
   })
 
-  const stopScanMutation = useMutation(scansAPI.stop, {
-    onSuccess: () => {
-      queryClient.invalidateQueries(['scans'])
-      toast.success('Scan stopped successfully!')
-    },
-    onError: (error: any) => {
-      toast.error(`Failed to stop scan: ${error.message}`)
-    },
-  })
-
-  // Delete scan mutation
-  const deleteScanMutation = useMutation(scansAPI.delete, {
-    onSuccess: () => {
-      queryClient.invalidateQueries(['scans'])
-      toast.success('Scan deleted successfully!')
-    },
-    onError: (error: any) => {
-      toast.error(`Failed to delete scan: ${error.message}`)
-    },
-  })
-
-  // Filter scans based on search and filters
-  const filteredScans = scans.filter((scan) => {
-    const matchesSearch = scan.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         scan.target_url?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         scan.scan_type?.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    const matchesStatus = statusFilter.length === 0 || statusFilter.includes(scan.status)
-    
-    const matchesProject = projectFilter.length === 0 || 
-                          projectFilter.includes(scan.project_id)
-    
-    return matchesSearch && matchesStatus && matchesProject
-  })
-
-  // Group scans by status
-  const scansByStatus = {
-    running: filteredScans.filter(s => s.status === 'running'),
-    paused: filteredScans.filter(s => s.status === 'paused'),
-    completed: filteredScans.filter(s => s.status === 'completed'),
-    failed: filteredScans.filter(s => s.status === 'failed'),
-    queued: filteredScans.filter(s => s.status === 'queued'),
-  }
-
-  const handleCreateScan = (scanData: any) => {
-    createScanMutation.mutate(scanData)
-  }
-
-  const handlePauseScan = (scanId: string) => {
-    pauseScanMutation.mutate(scanId)
-  }
-
-  const handleResumeScan = (scanId: string) => {
-    resumeScanMutation.mutate(scanId)
-  }
-
-  const handleStopScan = (scanId: string) => {
-    if (window.confirm('Are you sure you want to stop this scan? This action cannot be undone.')) {
-      stopScanMutation.mutate(scanId)
+  // Handle WebSocket messages
+  useEffect(() => {
+    if (addMessage) {
+      // Listen for scan updates
+      const handleScanUpdate = (message: any) => {
+        if (message.type === 'scan_update') {
+          queryClient.invalidateQueries({ queryKey: ['scans'] })
+        }
+      }
+      
+      // This would be set up in the WebSocket store
     }
-  }
-
-  const handleDeleteScan = (scanId: string) => {
-    if (window.confirm('Are you sure you want to delete this scan? This action cannot be undone.')) {
-      deleteScanMutation.mutate(scanId)
-    }
-  }
-
-  const handleViewLogs = (scan: Scan) => {
-    setSelectedScan(scan)
-    setShowLogsDialog(true)
-  }
-
-  const handleViewMetrics = (scan: Scan) => {
-    setSelectedScan(scan)
-    setShowMetricsDialog(true)
-  }
+  }, [addMessage, queryClient])
 
   const handleTabChange = (event: React.SyntheticEvent, newValue: number) => {
     setTabValue(newValue)
   }
 
-  // Wrapper functions to convert Scan objects to IDs
-  const handleStopScanWrapper = (scan: Scan) => {
-    handleStopScan(scan.id)
+  const handleCreateScan = () => {
+    if (!scanConfig.target.trim()) {
+      toast.error('Please enter a target URL')
+      return
+    }
+    createScanMutation.mutate(scanConfig)
   }
 
-  const handleDeleteScanWrapper = (scan: Scan) => {
-    handleDeleteScan(scan.id)
-  }
-
-  const toggleAutoRefresh = () => {
-    setAutoRefresh(!autoRefresh)
-    if (!autoRefresh) {
-      refetch()
+  const handleScanAction = (scan: Scan, action: 'start' | 'stop') => {
+    if (action === 'start') {
+      startScanMutation.mutate(scan.id)
+    } else if (action === 'stop') {
+      stopScanMutation.mutate(scan.id)
     }
   }
 
-  if (error) {
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'running': return 'success'
+      case 'completed': return 'primary'
+      case 'failed': return 'error'
+      case 'pending': return 'warning'
+      case 'stopped': return 'default'
+      default: return 'default'
+    }
+  }
+
+  const getModeColor = (mode: string) => {
+    switch (mode) {
+      case 'stealth': return 'info'
+      case 'standard': return 'primary'
+      case 'aggressive': return 'warning'
+      case 'maximum': return 'error'
+      default: return 'default'
+    }
+  }
+
+  const scans = scansData?.scans || []
+  const targets = targetsData?.targets || []
+
+  if (scansError) {
     return (
       <Box sx={{ p: 3 }}>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Failed to load scans: {(error as any).message}
+        <Alert severity="error" sx={{ mb: 3 }}>
+          Failed to load scans data. Please check your connection and try again.
         </Alert>
-        <Button onClick={() => refetch()} startIcon={<RefreshIcon />}>
+        <Button variant="contained" onClick={() => queryClient.invalidateQueries()}>
           Retry
         </Button>
       </Box>
@@ -265,249 +227,647 @@ const Scans: React.FC = () => {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', pb: 4 }}>
+    <Box sx={{ p: 3 }}>
       {/* Header */}
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 3 }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
-          <Typography variant="h4" sx={{ fontWeight: 600, mb: 0.5 }}>
+          <Typography variant="h4" component="h1" gutterBottom>
             Scan Management
           </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Monitor and control security testing scans in real-time
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <StatusIndicator connected={connected} />
+            <Typography variant="body2" color="text.secondary">
+              {connected ? 'Connected to BAC Hunter' : 'Disconnected'}
+            </Typography>
+          </Box>
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <FormControlLabel
-            control={
-              <Switch
-                checked={autoRefresh}
-                onChange={toggleAutoRefresh}
-                size="small"
-              />
-            }
-            label="Auto-refresh"
-            sx={{ mr: 2 }}
-          />
-          <Button
-            variant="outlined"
-            startIcon={<RefreshIcon />}
-            onClick={() => refetch()}
-            disabled={isLoading}
-          >
-            Refresh
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={() => setShowCreateDialog(true)}
-          >
-            New Scan
-          </Button>
-        </Box>
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() => setNewScanDialog(true)}
+        >
+          New Scan
+        </Button>
       </Box>
-
-      {/* Scan Statistics */}
-      <ScanStats scans={scans} />
-
-      {/* Search and Filters */}
-      <Card sx={{ mb: 3 }}>
-        <CardContent>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={6}>
-              <TextField
-                fullWidth
-                placeholder="Search scans..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                InputProps={{
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon />
-                    </InputAdornment>
-                  ),
-                }}
-              />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <ScanFilters
-                statusFilter={statusFilter}
-                setStatusFilter={setStatusFilter}
-                projectFilter={projectFilter}
-                setProjectFilter={setProjectFilter}
-                scans={scans}
-              />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
 
       {/* Tabs */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="scan tabs">
-          <Tab 
-            label={`All Scans (${filteredScans.length})`} 
-            icon={<SecurityIcon />}
-            iconPosition="start"
-          />
-          <Tab 
-            label={
-              <Badge badgeContent={scansByStatus.running.length} color="primary">
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                  <TrendIcon />
-                  Running
-                </Box>
-              </Badge>
-            }
-            iconPosition="start"
-          />
-          <Tab 
-            label={`Paused (${scansByStatus.paused.length})`} 
-            icon={<PauseIcon />}
-            iconPosition="start"
-          />
-          <Tab 
-            label={`Completed (${scansByStatus.completed.length})`} 
-            icon={<SuccessIcon />}
-            iconPosition="start"
-          />
-          <Tab 
-            label={`Failed (${scansByStatus.failed.length})`} 
-            icon={<ErrorIcon />}
-            iconPosition="start"
-          />
+        <Tabs value={tabValue} onChange={handleTabChange} aria-label="scan management tabs">
+          <Tab label="Active Scans" />
+          <Tab label="Scan History" />
+          <Tab label="Templates" />
+          <Tab label="Configuration" />
         </Tabs>
       </Box>
 
       {/* Tab Panels */}
       <TabPanel value={tabValue} index={0}>
-        <ScanGrid
-          scans={filteredScans}
-          isLoading={isLoading}
-          onPause={handlePauseScan}
-          onResume={handleResumeScan}
-          onStop={handleStopScanWrapper}
-          onDelete={handleDeleteScanWrapper}
-          onViewLogs={handleViewLogs}
-          onViewMetrics={handleViewMetrics}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-        />
+        {/* Active Scans */}
+        <Grid container spacing={3}>
+          {scansLoading ? (
+            // Loading skeletons
+            Array.from({ length: 6 }).map((_, index) => (
+              <Grid item xs={12} md={6} lg={4} key={index}>
+                <Card>
+                  <CardContent>
+                    <Skeleton height={24} width="60%" sx={{ mb: 1 }} />
+                    <Skeleton height={20} width="40%" sx={{ mb: 2 }} />
+                    <Skeleton height={16} width="80%" sx={{ mb: 1 }} />
+                    <Skeleton height={16} width="60%" />
+                  </CardContent>
+                </Card>
+              </Grid>
+            ))
+          ) : scans.filter(s => ['running', 'pending'].includes(s.status)).length === 0 ? (
+            <Grid item xs={12}>
+              <Card>
+                <CardContent sx={{ textAlign: 'center', py: 4 }}>
+                  <Typography variant="h6" color="text.secondary" gutterBottom>
+                    No Active Scans
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                    Start a new scan to begin security testing
+                  </Typography>
+                  <Button
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    onClick={() => setNewScanDialog(true)}
+                  >
+                    Create Scan
+                  </Button>
+                </CardContent>
+              </Card>
+            </Grid>
+          ) : (
+            scans
+              .filter(s => ['running', 'pending'].includes(s.status))
+              .map((scan) => (
+                <Grid item xs={12} md={6} lg={4} key={scan.id}>
+                  <Card>
+                    <CardContent>
+                      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                        <Typography variant="h6" noWrap sx={{ maxWidth: '70%' }}>
+                          {scan.name}
+                        </Typography>
+                        <Chip
+                          label={scan.status}
+                          color={getStatusColor(scan.status) as any}
+                          size="small"
+                        />
+                      </Box>
+                      
+                      <Typography variant="body2" color="text.secondary" gutterBottom>
+                        Target: {targets.find(t => t.id === scan.target_id)?.base_url || `ID: ${scan.target_id}`}
+                      </Typography>
+                      
+                      <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+                        <Chip
+                          label={scan.mode}
+                          color={getModeColor(scan.mode) as any}
+                          size="small"
+                          variant="outlined"
+                        />
+                        {scan.enable_ai && (
+                          <Chip
+                            label="AI Enabled"
+                            color="secondary"
+                            size="small"
+                            variant="outlined"
+                            icon={<AIIcon />}
+                          />
+                        )}
+                      </Box>
+
+                      {scan.status === 'running' && (
+                        <Box sx={{ mb: 2 }}>
+                          <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                            <Typography variant="body2">Progress</Typography>
+                            <Typography variant="body2">{Math.round(scan.progress * 100)}%</Typography>
+                          </Box>
+                          <LinearProgress
+                            variant="determinate"
+                            value={scan.progress * 100}
+                            sx={{ height: 8, borderRadius: 4 }}
+                          />
+                        </Box>
+                      )}
+
+                      <Box sx={{ display: 'flex', gap: 1, justifyContent: 'space-between' }}>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          {scan.status === 'pending' && (
+                            <Button
+                              size="small"
+                              startIcon={<PlayIcon />}
+                              onClick={() => handleScanAction(scan, 'start')}
+                              disabled={startScanMutation.isPending}
+                            >
+                              Start
+                            </Button>
+                          )}
+                          {scan.status === 'running' && (
+                            <Button
+                              size="small"
+                              startIcon={<StopIcon />}
+                              onClick={() => handleScanAction(scan, 'stop')}
+                              disabled={stopScanMutation.isPending}
+                              color="error"
+                            >
+                              Stop
+                            </Button>
+                          )}
+                        </Box>
+                        
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Tooltip title="View Details">
+                            <IconButton size="small" onClick={() => setSelectedScan(scan)}>
+                              <ViewIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="View Logs">
+                            <IconButton size="small">
+                              <TimelineIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              ))
+          )}
+        </Grid>
       </TabPanel>
 
       <TabPanel value={tabValue} index={1}>
-        <ScanGrid
-          scans={scansByStatus.running}
-          isLoading={isLoading}
-          onPause={handlePauseScan}
-          onResume={handleResumeScan}
-          onStop={handleStopScanWrapper}
-          onDelete={handleDeleteScanWrapper}
-          onViewLogs={handleViewLogs}
-          onViewMetrics={handleViewMetrics}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-        />
+        {/* Scan History */}
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Scan History
+            </Typography>
+            <TableContainer component={Paper} variant="outlined">
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Name</TableCell>
+                    <TableCell>Target</TableCell>
+                    <TableCell>Mode</TableCell>
+                    <TableCell>Status</TableCell>
+                    <TableCell>Progress</TableCell>
+                    <TableCell>Created</TableCell>
+                    <TableCell>Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {scansLoading ? (
+                    Array.from({ length: 5 }).map((_, index) => (
+                      <TableRow key={index}>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                        <TableCell><Skeleton height={20} /></TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    scans
+                      .filter(s => ['completed', 'failed', 'stopped'].includes(s.status))
+                      .map((scan) => (
+                        <TableRow key={scan.id}>
+                          <TableCell>{scan.name}</TableCell>
+                          <TableCell>
+                            {targets.find(t => t.id === scan.target_id)?.base_url || `ID: ${scan.target_id}`}
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={scan.mode}
+                              color={getModeColor(scan.mode) as any}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={scan.status}
+                              color={getStatusColor(scan.status) as any}
+                              size="small"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              <LinearProgress
+                                variant="determinate"
+                                value={scan.progress * 100}
+                                sx={{ width: 60, height: 6 }}
+                              />
+                              <Typography variant="body2">
+                                {Math.round(scan.progress * 100)}%
+                              </Typography>
+                            </Box>
+                          </TableCell>
+                          <TableCell>
+                            {new Date(scan.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <Box sx={{ display: 'flex', gap: 1 }}>
+                              <Tooltip title="View Details">
+                                <IconButton size="small" onClick={() => setSelectedScan(scan)}>
+                                  <ViewIcon />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Download Report">
+                                <IconButton size="small">
+                                  <DownloadIcon />
+                                </IconButton>
+                              </Tooltip>
+                              <Tooltip title="Delete">
+                                <IconButton size="small" color="error">
+                                  <DeleteIcon />
+                                </IconButton>
+                              </Tooltip>
+                            </Box>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
       </TabPanel>
 
       <TabPanel value={tabValue} index={2}>
-        <ScanGrid
-          scans={scansByStatus.paused}
-          isLoading={isLoading}
-          onPause={handlePauseScan}
-          onResume={handleResumeScan}
-          onStop={handleStopScanWrapper}
-          onDelete={handleDeleteScanWrapper}
-          onViewLogs={handleViewLogs}
-          onViewMetrics={handleViewMetrics}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-        />
+        {/* Scan Templates */}
+        <Grid container spacing={3}>
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Quick Scan Template
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Standard security assessment with AI-powered analysis
+                </Typography>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>Mode:</strong> Standard
+                  </Typography>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>Phases:</strong> Reconnaissance, Access Control Testing
+                  </Typography>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>AI:</strong> Enabled
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Rate Limit:</strong> 2 RPS
+                  </Typography>
+                </Box>
+                <Button
+                  variant="outlined"
+                  onClick={() => {
+                    setScanConfig({
+                      target: '',
+                      mode: 'standard',
+                      max_rps: 2.0,
+                      phases: ['recon', 'access'],
+                      enable_ai: true,
+                    })
+                    setNewScanDialog(true)
+                  }}
+                >
+                  Use Template
+                </Button>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Stealth Scan Template
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Low-profile scanning for sensitive environments
+                </Typography>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>Mode:</strong> Stealth
+                  </Typography>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>Phases:</strong> Reconnaissance only
+                  </Typography>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>AI:</strong> Disabled
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Rate Limit:</strong> 0.5 RPS
+                  </Typography>
+                </Box>
+                <Button
+                  variant="outlined"
+                  onClick={() => {
+                    setScanConfig({
+                      target: '',
+                      mode: 'stealth',
+                      max_rps: 0.5,
+                      phases: ['recon'],
+                      enable_ai: false,
+                    })
+                    setNewScanDialog(true)
+                  }}
+                >
+                  Use Template
+                </Button>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Comprehensive Audit Template
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Full security assessment with all phases and AI analysis
+                </Typography>
+                <Box sx={{ mb: 2 }}>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>Mode:</strong> Aggressive
+                  </Typography>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>Phases:</strong> All phases
+                  </Typography>
+                  <Typography variant="body2" gutterBottom>
+                    <strong>AI:</strong> Enabled
+                  </Typography>
+                  <Typography variant="body2">
+                    <strong>Rate Limit:</strong> 5 RPS
+                  </Typography>
+                </Box>
+                <Button
+                  variant="outlined"
+                  onClick={() => {
+                    setScanConfig({
+                      target: '',
+                      mode: 'aggressive',
+                      max_rps: 5.0,
+                      phases: ['recon', 'access', 'audit', 'exploit'],
+                      enable_ai: true,
+                    })
+                    setNewScanDialog(true)
+                  }}
+                >
+                  Use Template
+                </Button>
+              </CardContent>
+            </Card>
+          </Grid>
+
+          <Grid item xs={12} md={6}>
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Custom Template
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                  Create your own scan configuration
+                </Typography>
+                <Button
+                  variant="outlined"
+                  onClick={() => setNewScanDialog(true)}
+                >
+                  Create Custom
+                </Button>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
       </TabPanel>
 
       <TabPanel value={tabValue} index={3}>
-        <ScanGrid
-          scans={scansByStatus.completed}
-          isLoading={isLoading}
-          onPause={handlePauseScan}
-          onResume={handleResumeScan}
-          onStop={handleStopScanWrapper}
-          onDelete={handleDeleteScanWrapper}
-          onViewLogs={handleViewLogs}
-          onViewMetrics={handleViewMetrics}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-        />
+        {/* Configuration */}
+        <Card>
+          <CardContent>
+            <Typography variant="h6" gutterBottom>
+              Global Scan Configuration
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Default Scan Mode</InputLabel>
+                  <Select
+                    value="standard"
+                    label="Default Scan Mode"
+                  >
+                    <MenuItem value="stealth">Stealth</MenuItem>
+                    <MenuItem value="standard">Standard</MenuItem>
+                    <MenuItem value="aggressive">Aggressive</MenuItem>
+                    <MenuItem value="maximum">Maximum</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth>
+                  <InputLabel>Default Rate Limit</InputLabel>
+                  <Select
+                    value={2.0}
+                    label="Default Rate Limit"
+                  >
+                    <MenuItem value={0.5}>0.5 RPS (Stealth)</MenuItem>
+                    <MenuItem value={1.0}>1.0 RPS (Conservative)</MenuItem>
+                    <MenuItem value={2.0}>2.0 RPS (Standard)</MenuItem>
+                    <MenuItem value={5.0}>5.0 RPS (Aggressive)</MenuItem>
+                    <MenuItem value={10.0}>10.0 RPS (Maximum)</MenuItem>
+                  </Select>
+                </FormControl>
+              </Grid>
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={<Switch defaultChecked />}
+                  label="Enable AI by default"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <FormControlLabel
+                  control={<Switch defaultChecked />}
+                  label="Obey robots.txt by default"
+                />
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
       </TabPanel>
 
-      <TabPanel value={tabValue} index={4}>
-        <ScanGrid
-          scans={scansByStatus.failed}
-          isLoading={isLoading}
-          onPause={handlePauseScan}
-          onResume={handleResumeScan}
-          onStop={handleStopScanWrapper}
-          onDelete={handleDeleteScanWrapper}
-          onViewLogs={handleViewLogs}
-          onViewMetrics={handleViewMetrics}
-          viewMode={viewMode}
-          setViewMode={setViewMode}
-        />
-      </TabPanel>
-
-      {/* Create Scan Dialog */}
+      {/* New Scan Dialog */}
       <Dialog
-        open={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
-        maxWidth="lg"
+        open={newScanDialog}
+        onClose={() => setNewScanDialog(false)}
+        maxWidth="md"
         fullWidth
       >
         <DialogTitle>Create New Scan</DialogTitle>
         <DialogContent>
-          <ScanForm
-            onSubmit={handleCreateScan}
-            onCancel={() => setShowCreateDialog(false)}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* Scan Logs Dialog */}
-      <Dialog
-        open={showLogsDialog}
-        onClose={() => setShowLogsDialog(false)}
-        maxWidth="lg"
-        fullWidth
-        PaperProps={{
-          sx: { height: '80vh' }
-        }}
-      >
-        <DialogTitle>Scan Logs - {selectedScan?.name}</DialogTitle>
-        <DialogContent>
-          {selectedScan && (
-            <ScanLogs scan={selectedScan} />
-          )}
+          <Grid container spacing={3} sx={{ mt: 1 }}>
+            <Grid item xs={12}>
+              <TextField
+                fullWidth
+                label="Target URL"
+                placeholder="https://example.com"
+                value={scanConfig.target}
+                onChange={(e) => setScanConfig({ ...scanConfig, target: e.target.value })}
+                helperText="Enter the target URL or domain to scan"
+              />
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <InputLabel>Scan Mode</InputLabel>
+                <Select
+                  value={scanConfig.mode}
+                  label="Scan Mode"
+                  onChange={(e) => setScanConfig({ ...scanConfig, mode: e.target.value })}
+                >
+                  <MenuItem value="stealth">Stealth (Low profile)</MenuItem>
+                  <MenuItem value="standard">Standard (Balanced)</MenuItem>
+                  <MenuItem value="aggressive">Aggressive (Thorough)</MenuItem>
+                  <MenuItem value="maximum">Maximum (Comprehensive)</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            
+            <Grid item xs={12} md={6}>
+              <TextField
+                fullWidth
+                label="Max Requests per Second"
+                type="number"
+                value={scanConfig.max_rps}
+                onChange={(e) => setScanConfig({ ...scanConfig, max_rps: parseFloat(e.target.value) })}
+                inputProps={{ min: 0.1, max: 20, step: 0.1 }}
+                helperText="Rate limiting for respectful scanning"
+              />
+            </Grid>
+            
+            <Grid item xs={12}>
+              <Typography variant="subtitle2" gutterBottom>
+                Scan Phases
+              </Typography>
+              <Grid container spacing={1}>
+                {['recon', 'access', 'audit', 'exploit'].map((phase) => (
+                  <Grid item key={phase}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={scanConfig.phases.includes(phase)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setScanConfig({
+                                ...scanConfig,
+                                phases: [...scanConfig.phases, phase]
+                              })
+                            } else {
+                              setScanConfig({
+                                ...scanConfig,
+                                phases: scanConfig.phases.filter(p => p !== phase)
+                              })
+                            }
+                          }}
+                        />
+                      }
+                      label={phase.charAt(0).toUpperCase() + phase.slice(1)}
+                    />
+                  </Grid>
+                ))}
+              </Grid>
+            </Grid>
+            
+            <Grid item xs={12}>
+              <FormControlLabel
+                control={
+                  <Switch
+                    checked={scanConfig.enable_ai}
+                    onChange={(e) => setScanConfig({ ...scanConfig, enable_ai: e.target.checked })}
+                  />
+                }
+                label="Enable AI-powered analysis"
+              />
+            </Grid>
+            
+            <Grid item xs={12}>
+              <FormControlLabel
+                control={<Switch defaultChecked />}
+                label="Obey robots.txt"
+              />
+            </Grid>
+          </Grid>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowLogsDialog(false)}>Close</Button>
+          <Button onClick={() => setNewScanDialog(false)}>Cancel</Button>
+          <Button
+            onClick={handleCreateScan}
+            variant="contained"
+            disabled={createScanMutation.isPending}
+          >
+            {createScanMutation.isPending ? 'Creating...' : 'Create Scan'}
+          </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Scan Metrics Dialog */}
-      <Dialog
-        open={showMetricsDialog}
-        onClose={() => setShowMetricsDialog(false)}
-        maxWidth="lg"
-        fullWidth
-      >
-        <DialogTitle>Scan Metrics - {selectedScan?.name}</DialogTitle>
-        <DialogContent>
-          {selectedScan && (
-            <ScanMetrics scan={selectedScan} />
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowMetricsDialog(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      {/* Scan Details Dialog */}
+      {selectedScan && (
+        <Dialog
+          open={!!selectedScan}
+          onClose={() => setSelectedScan(null)}
+          maxWidth="md"
+          fullWidth
+        >
+          <DialogTitle>Scan Details: {selectedScan.name}</DialogTitle>
+          <DialogContent>
+            <Grid container spacing={3} sx={{ mt: 1 }}>
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Status:</strong> {selectedScan.status}
+                </Typography>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Mode:</strong> {selectedScan.mode}
+                </Typography>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Target ID:</strong> {selectedScan.target_id}
+                </Typography>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Created:</strong> {new Date(selectedScan.created_at).toLocaleString()}
+                </Typography>
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <Typography variant="subtitle2" gutterBottom>
+                  <strong>Progress:</strong> {Math.round(selectedScan.progress * 100)}%
+                </Typography>
+                {selectedScan.started_at && (
+                  <Typography variant="subtitle2" gutterBottom>
+                    <strong>Started:</strong> {new Date(selectedScan.started_at).toLocaleString()}
+                  </Typography>
+                )}
+                {selectedScan.completed_at && (
+                  <Typography variant="subtitle2" gutterBottom>
+                    <strong>Completed:</strong> {new Date(selectedScan.completed_at).toLocaleString()}
+                  </Typography>
+                )}
+                {selectedScan.error_message && (
+                  <Typography variant="subtitle2" color="error">
+                    <strong>Error:</strong> {selectedScan.error_message}
+                  </Typography>
+                )}
+              </Grid>
+            </Grid>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setSelectedScan(null)}>Close</Button>
+          </DialogActions>
+        </Dialog>
+      )}
     </Box>
   )
 }
