@@ -236,7 +236,7 @@ print(f"Average confidence: {decision_insights['average_confidence']}")
 ### Dashboard Access
 
 ```python
-from bac_hunter.webapp.ai_dashboard import create_ai_dashboard
+# Webapp removed - CLI only mode
 
 # Create dashboard
 dashboard = create_ai_dashboard(ai_engine)

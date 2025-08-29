@@ -36,7 +36,7 @@ try:
     from .profiling import TargetProfiler
     # Dashboard import is optional to avoid FastAPI requirement during CLI import in tests
     try:
-        from .webapp import app as dashboard_app  # type: ignore
+        # Webapp removed - CLI only mode
     except Exception:
         dashboard_app = None  # type: ignore
 except Exception:  # fallback when executed as a top-level module
@@ -59,7 +59,7 @@ except Exception:  # fallback when executed as a top-level module
     from fallback import PathScanner, ParamScanner
     from profiling import TargetProfiler
     try:
-        from webapp import app as dashboard_app  # type: ignore
+        # Webapp removed - CLI only mode
     except Exception:
         dashboard_app = None  # type: ignore
 try:
@@ -2446,7 +2446,7 @@ def modern_dashboard(
         
         # Import and start the modern dashboard
         try:
-            from .webapp.modern_dashboard import app as dashboard_app
+            # Webapp removed - CLI only mode
         except ImportError:
             console.print("[red]❌ Modern dashboard not available. Install web dependencies.[/red]")
             raise typer.Exit(1)

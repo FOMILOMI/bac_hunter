@@ -1,10 +1,10 @@
-# BAC Hunter - Professional Broken Access Control Security Testing Platform
+# BAC Hunter - Professional Broken Access Control Security Testing Tool
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Security](https://img.shields.io/badge/security-tool-red.svg)](https://github.com/bachunter/bac-hunter)
 
-**BAC Hunter** is a comprehensive, AI-powered security testing platform designed to detect Broken Access Control (BAC) vulnerabilities, IDOR (Insecure Direct Object Reference) issues, and privilege escalation flaws in web applications.
+**BAC Hunter** is a comprehensive, AI-powered security testing tool designed to detect Broken Access Control (BAC) vulnerabilities, IDOR (Insecure Direct Object Reference) issues, and privilege escalation flaws in web applications.
 
 ## 🎯 What BAC Hunter Actually Does
 
@@ -38,7 +38,6 @@ BAC Hunter is a **real, working security testing tool** that provides:
 - **Session Management**: Persistent authentication handling
 - **Rate Limiting**: Intelligent request throttling with WAF detection
 - **Multiple Scan Modes**: Stealth, Standard, Aggressive, Maximum
-- **Real-time Dashboard**: Modern React-based web interface
 - **Comprehensive Reporting**: HTML, CSV, and JSON export formats
 - **CI/CD Integration**: Automated security testing in pipelines
 
@@ -49,14 +48,8 @@ BAC Hunter is a **real, working security testing tool** that provides:
 - **Reconnaissance**: `bac-hunter recon https://target.com`
 - **Full audit**: `bac-hunter audit https://target.com`
 - **Interactive setup**: `bac-hunter setup-wizard`
-- **Web dashboard**: `bac-hunter dashboard`
-
-### ✅ **Web Interface**
-- **Modern React Dashboard**: Real-time scan monitoring
-- **WebSocket Updates**: Live progress and results
-- **Interactive Controls**: Start, stop, and configure scans
-- **Visual Analytics**: Charts and vulnerability summaries
-- **Responsive Design**: Works on desktop and mobile
+- **IDOR testing**: `bac-hunter idor https://target.com`
+- **Parameter mining**: `bac-hunter mine-params https://target.com`
 
 ### ✅ **Intelligent Automation**
 - **Smart Mode Selection**: Automatically adjusts based on target response
@@ -68,7 +61,6 @@ BAC Hunter is a **real, working security testing tool** that provides:
 
 ### Prerequisites
 - Python 3.8 or higher
-- Modern web browser (for dashboard)
 
 ### Quick Install
 ```bash
@@ -90,147 +82,133 @@ pip install -e .[dev]
 
 # Install with AI capabilities
 pip install -e .[ai]
-
-# Install with full features
-pip install -e .[full]
 ```
 
 ## 🎮 Usage Examples
 
 ### Basic Scanning
 ```bash
-# Quick scan with default settings
-bac-hunter smart-scan https://example.com
+# Smart scan with automatic mode selection
+bac-hunter smart-scan https://target.com
 
-# Stealth mode for sensitive targets
-bac-hunter smart-scan https://example.com --mode stealth
+# Reconnaissance only
+bac-hunter recon https://target.com
 
-# Basic scan with report generation
-bac-hunter smart-scan https://example.com --basic --generate-report
+# Full security audit
+bac-hunter audit https://target.com
 ```
 
 ### Advanced Testing
 ```bash
-# Full reconnaissance
-bac-hunter recon https://example.com
+# IDOR vulnerability testing
+bac-hunter idor https://target.com --identities config/identities.yaml
 
-# Complete audit with custom phases
-bac-hunter audit https://example.com --phases recon,access,audit
+# Parameter mining and testing
+bac-hunter mine-params https://target.com --depth 3
 
-# IDOR-specific testing
-bac-hunter idor-test https://example.com --identities identities.yaml
+# GraphQL endpoint testing
+bac-hunter graphql https://target.com --introspection
+
+# Custom scan with specific modes
+bac-hunter scan https://target.com --mode aggressive --max-rps 5
 ```
 
-### Web Dashboard
+### Configuration
 ```bash
-# Start the web interface
-bac-hunter dashboard --host 0.0.0.0 --port 8000
+# Interactive setup wizard
+bac-hunter setup-wizard
 
-# Then visit: http://localhost:8000
+# View current configuration
+bac-hunter config show
+
+# Test authentication
+bac-hunter auth test https://target.com
 ```
 
 ## 🏗️ Architecture
 
-### Core Components
-- **CLI Interface**: Typer-based command line interface
-- **Plugin System**: Modular architecture for easy extension
-- **Session Management**: Persistent authentication handling
-- **Database Layer**: SQLite-based storage with encryption
-- **HTTP Client**: Advanced HTTP client with rate limiting
-- **AI Engine**: Machine learning for vulnerability detection
+BAC Hunter is built with a modular, plugin-based architecture:
 
-### Plugin Architecture
-```
-bac_hunter/
-├── plugins/           # Reconnaissance plugins
-│   ├── recon/        # Discovery modules
-│   └── enhanced_*    # Specialized testers
-├── access/           # Access control testing
-├── intelligence/     # AI and ML capabilities
-├── webapp/          # React dashboard backend
-└── utils/           # Shared utilities
-```
+- **Core Engine**: Central scanning and orchestration
+- **Plugin System**: Extensible reconnaissance and testing modules
+- **Intelligence Layer**: AI-powered analysis and decision making
+- **Storage Backend**: Flexible data persistence (SQLite, Enterprise)
+- **CLI Interface**: Rich, interactive command-line experience
 
 ## 🔧 Configuration
 
 ### Environment Variables
 ```bash
-export BAC_HUNTER_DB_PATH="/path/to/database.db"
-export BAC_HUNTER_LOG_LEVEL="INFO"
-export BAC_HUNTER_MAX_RPS="2.0"
+export BH_DISABLE_AUTH_STORE=1          # Disable secure storage
+export BH_LOG_LEVEL=INFO                # Set logging level
+export BH_MAX_RPS=2.0                   # Rate limiting
+export BH_SCAN_TIMEOUT=300              # Scan timeout
 ```
 
 ### Configuration Files
-- **identities.yaml**: User accounts and authentication data
-- **tasks.yaml**: Custom scan configurations
-- **.bac-hunter.yml**: Global settings
+- `identities.yaml`: User identity configurations
+- `tasks.yaml`: Custom scan task definitions
+- `.bac-hunter.yml`: Project-specific settings
 
 ## 📊 Output & Reporting
 
-### Scan Results
-- **Real-time Updates**: Live progress via WebSocket
-- **Database Storage**: Persistent SQLite storage
-- **Export Formats**: HTML, CSV, JSON reports
-- **Risk Scoring**: Automated vulnerability prioritization
+### Report Formats
+- **HTML Reports**: Interactive web-based reports
+- **CSV Export**: Data analysis and processing
+- **JSON Output**: API integration and automation
+- **Console Output**: Real-time progress and results
 
-### Report Types
-- **Executive Summary**: High-level risk overview
-- **Technical Details**: Comprehensive vulnerability information
-- **Remediation Guide**: Actionable security recommendations
-- **Evidence Collection**: Proof-of-concept examples
+### Sample Output
+```bash
+[INFO] Starting BAC Hunter scan...
+[INFO] Target: https://target.com
+[INFO] Mode: Standard
+[INFO] Identities: 3 configured
+[INFO] Starting reconnaissance phase...
+[SUCCESS] Found 45 endpoints
+[INFO] Starting access control testing...
+[VULNERABILITY] IDOR detected in /api/users/{id}
+[INFO] Scan completed in 2m 34s
+[SUCCESS] Generated report: report_20241201_143022.html
+```
 
-## 🛡️ Security & Ethics
+## 🧪 Testing & Development
 
-### Responsible Disclosure
-- **Rate Limiting**: Respectful scanning with configurable limits
-- **Robots.txt Compliance**: Honors website crawling policies
-- **Error Handling**: Graceful failure without causing issues
-- **Logging**: Comprehensive audit trails for compliance
+### Running Tests
+```bash
+# Run all tests
+pytest
 
-### Legal Compliance
-- **Authorized Testing Only**: Use only on systems you own or have permission to test
-- **Terms of Service**: Respect website terms and conditions
-- **Data Protection**: Secure handling of sensitive information
+# Run specific test categories
+pytest tests/test_access/
+pytest tests/test_intelligence/
 
-## 🤝 Contributing
-
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+# Run with coverage
+pytest --cov=bac_hunter
+```
 
 ### Development Setup
 ```bash
 # Install development dependencies
 pip install -e .[dev]
 
-# Run tests
-pytest
-
-# Code formatting
-black bac_hunter/
+# Run linting
 flake8 bac_hunter/
+black bac_hunter/
+
+# Type checking
+mypy bac_hunter/
 ```
 
-## 📚 Documentation
+## 🤝 Contributing
 
-- **User Guide**: [docs/user_guides/README_ENHANCED.md](docs/user_guides/README_ENHANCED.md)
-- **Implementation Details**: [docs/implementation/](docs/implementation/)
-- **API Reference**: [docs/technical/](docs/technical/)
+We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
 
-## 🏆 Use Cases
-
-### Security Researchers
-- **Vulnerability Research**: Discover new BAC patterns
-- **Tool Development**: Extend with custom plugins
-- **Methodology Testing**: Validate security approaches
-
-### Penetration Testers
-- **Web Application Testing**: Comprehensive BAC assessment
-- **Red Team Operations**: Advanced access control testing
-- **Compliance Audits**: Security standard validation
-
-### Development Teams
-- **Security Testing**: CI/CD integration for automated testing
-- **Code Review**: Identify access control issues early
-- **Training**: Security awareness and best practices
+### Development Areas
+- **New Reconnaissance Plugins**: Add support for new endpoint discovery methods
+- **Enhanced AI Models**: Improve vulnerability detection accuracy
+- **Performance Optimization**: Faster scanning and better resource usage
+- **Documentation**: Improve guides and examples
 
 ## 📄 License
 
@@ -238,21 +216,14 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## ⚠️ Disclaimer
 
-**BAC Hunter is a security testing tool designed for authorized security assessments only.**
-
-- Use only on systems you own or have explicit permission to test
-- Respect all applicable laws and regulations
-- Follow responsible disclosure practices
-- The authors are not responsible for misuse of this tool
+BAC Hunter is designed for authorized security testing only. Always ensure you have proper authorization before testing any target. The authors are not responsible for any misuse of this tool.
 
 ## 🆘 Support
 
 - **Issues**: [GitHub Issues](https://github.com/bachunter/bac-hunter/issues)
+- **Documentation**: [Wiki](https://github.com/bachunter/bac-hunter/wiki)
 - **Discussions**: [GitHub Discussions](https://github.com/bachunter/bac-hunter/discussions)
-- **Security**: [Security Policy](SECURITY.md)
 
 ---
 
-**Made with ❤️ by the BAC Hunter Security Team**
-
-*Protecting the web, one access control at a time.*
+**BAC Hunter** - Professional security testing for the modern web.
