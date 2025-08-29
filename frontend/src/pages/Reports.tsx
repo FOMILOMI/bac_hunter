@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from 'react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box,
   Typography,
@@ -85,6 +85,7 @@ import ReportStats from '../components/reports/ReportStats'
 import ReportDetails from '../components/reports/ReportDetails'
 import ReportPreview from '../components/reports/ReportPreview'
 import ReportExport from '../components/reports/ReportExport'
+import ReportGrid from '../components/reports/ReportGrid'
 
 interface TabPanelProps {
   children?: React.ReactNode
@@ -118,7 +119,7 @@ const Reports: React.FC = () => {
   const [projectFilter, setProjectFilter] = useState<string[]>([])
   const [scanFilter, setScanFilter] = useState<string[]>([])
   const [showCreateDialog, setShowCreateDialog] = useState(false)
-  const [showDetailsDialog, setShowDetailsDialog] = useState(false)}
+  const [showDetailsDialog, setShowDetailsDialog] = useState(false)
   const [showPreviewDialog, setShowPreviewDialog] = useState(false)
   const [showExportDialog, setShowExportDialog] = useState(false)
   const [selectedReport, setSelectedReport] = useState<Report | null>(null)

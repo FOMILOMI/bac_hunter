@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from 'react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Box,
   Typography,
@@ -69,6 +69,7 @@ import ScanFilters from '../components/scans/ScanFilters'
 import ScanStats from '../components/scans/ScanStats'
 import ScanLogs from '../components/scans/ScanLogs'
 import ScanProgress from '../components/scans/ScanProgress'
+import ScanGrid from '../components/scans/ScanGrid'
 import ScanMetrics from '../components/scans/ScanMetrics'
 
 interface TabPanelProps {
@@ -234,6 +235,15 @@ const Scans: React.FC = () => {
     setTabValue(newValue)
   }
 
+  // Wrapper functions to convert Scan objects to IDs
+  const handleStopScanWrapper = (scan: Scan) => {
+    handleStopScan(scan.id)
+  }
+
+  const handleDeleteScanWrapper = (scan: Scan) => {
+    handleDeleteScan(scan.id)
+  }
+
   const toggleAutoRefresh = () => {
     setAutoRefresh(!autoRefresh)
     if (!autoRefresh) {
@@ -375,8 +385,8 @@ const Scans: React.FC = () => {
           isLoading={isLoading}
           onPause={handlePauseScan}
           onResume={handleResumeScan}
-          onStop={handleStopScan}
-          onDelete={handleDeleteScan}
+          onStop={handleStopScanWrapper}
+          onDelete={handleDeleteScanWrapper}
           onViewLogs={handleViewLogs}
           onViewMetrics={handleViewMetrics}
           viewMode={viewMode}
@@ -390,8 +400,8 @@ const Scans: React.FC = () => {
           isLoading={isLoading}
           onPause={handlePauseScan}
           onResume={handleResumeScan}
-          onStop={handleStopScan}
-          onDelete={handleDeleteScan}
+          onStop={handleStopScanWrapper}
+          onDelete={handleDeleteScanWrapper}
           onViewLogs={handleViewLogs}
           onViewMetrics={handleViewMetrics}
           viewMode={viewMode}
@@ -405,8 +415,8 @@ const Scans: React.FC = () => {
           isLoading={isLoading}
           onPause={handlePauseScan}
           onResume={handleResumeScan}
-          onStop={handleStopScan}
-          onDelete={handleDeleteScan}
+          onStop={handleStopScanWrapper}
+          onDelete={handleDeleteScanWrapper}
           onViewLogs={handleViewLogs}
           onViewMetrics={handleViewMetrics}
           viewMode={viewMode}
@@ -420,8 +430,8 @@ const Scans: React.FC = () => {
           isLoading={isLoading}
           onPause={handlePauseScan}
           onResume={handleResumeScan}
-          onStop={handleStopScan}
-          onDelete={handleDeleteScan}
+          onStop={handleStopScanWrapper}
+          onDelete={handleDeleteScanWrapper}
           onViewLogs={handleViewLogs}
           onViewMetrics={handleViewMetrics}
           viewMode={viewMode}
@@ -435,8 +445,8 @@ const Scans: React.FC = () => {
           isLoading={isLoading}
           onPause={handlePauseScan}
           onResume={handleResumeScan}
-          onStop={handleStopScan}
-          onDelete={handleDeleteScan}
+          onStop={handleStopScanWrapper}
+          onDelete={handleDeleteScanWrapper}
           onViewLogs={handleViewLogs}
           onViewMetrics={handleViewMetrics}
           viewMode={viewMode}
