@@ -4,12 +4,14 @@ try:
 	from .dirsearch_wrapper import DirsearchWrapper
 	from .subfinder_wrapper import SubfinderWrapper
 	from .pd_httpx_wrapper import PDHttpxWrapper
+	from .proxy_manager import ProxyManager, RotatingProxyManager
 except ImportError:
 	from integrations.external_tools import ExternalToolRunner
 	from integrations.nuclei_integration import NucleiRunner
 	from integrations.dirsearch_wrapper import DirsearchWrapper
 	from integrations.subfinder_wrapper import SubfinderWrapper
 	from integrations.pd_httpx_wrapper import PDHttpxWrapper
+	from integrations.proxy_manager import ProxyManager, RotatingProxyManager
 
 __all__ = [
     "ExternalToolRunner",
@@ -17,6 +19,8 @@ __all__ = [
     "DirsearchWrapper",
     "SubfinderWrapper",
     "PDHttpxWrapper",
+    "ProxyManager",
+    "RotatingProxyManager",
 ]
 
 class CaptchaService:

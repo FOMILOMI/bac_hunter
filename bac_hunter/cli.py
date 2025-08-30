@@ -13,7 +13,7 @@ console = Console()
 try:
     from . import __version__ as _BH_VERSION
 except Exception:
-    _BH_VERSION = "2.0.0"
+    _BH_VERSION = "3.0.0"
 
 try:
     from .config import Settings, Identity
@@ -37,6 +37,7 @@ try:
     # Dashboard import is optional to avoid FastAPI requirement during CLI import in tests
     try:
         # Webapp removed - CLI only mode
+        dashboard_app = None  # type: ignore
     except Exception:
         dashboard_app = None  # type: ignore
 except Exception:  # fallback when executed as a top-level module
@@ -60,6 +61,7 @@ except Exception:  # fallback when executed as a top-level module
     from profiling import TargetProfiler
     try:
         # Webapp removed - CLI only mode
+        dashboard_app = None  # type: ignore
     except Exception:
         dashboard_app = None  # type: ignore
 try:
@@ -120,11 +122,11 @@ import json
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="BAC-HUNTER v2.0 - Comprehensive BAC Assessment")
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def _version_callback(
     ctx: typer.Context,
     version: bool = typer.Option(
-        None,
+        False,
         "--version",
         help="Show version and exit",
         is_eager=True,
@@ -2447,6 +2449,7 @@ def modern_dashboard(
         # Import and start the modern dashboard
         try:
             # Webapp removed - CLI only mode
+            raise ImportError("Web dashboard not available")
         except ImportError:
             console.print("[red]❌ Modern dashboard not available. Install web dependencies.[/red]")
             raise typer.Exit(1)
