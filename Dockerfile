@@ -36,9 +36,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt /app/
 RUN pip install --no-cache-dir -r requirements.txt \
-	&& python -m playwright install --with-deps chromium
+	&& python -m playwright install --with-deps chromium || true
 
 COPY . /app
 
-# Default command shows help
-CMD ["python", "-m", "bac_hunter.cli", "--help"]
+# Expose API port
+EXPOSE 9000
+
+# Default command starts the web API
+CMD ["python", "-m", "webapp.main"]
