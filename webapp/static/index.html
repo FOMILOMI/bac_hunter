@@ -1,14 +1,240 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vite + React + TS</title>
-    <script type="module" crossorigin src="/assets/index-C9e6wvXC.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-DpNEK_ld.css">
-  </head>
-  <body>
-    <div id="root"></div>
-  </body>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BAC Hunter - Web Interface</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; }
+        .container { display: flex; height: 100vh; }
+        aside { width: 300px; background: #2c3e50; color: white; padding: 20px; overflow-y: auto; }
+        main { flex: 1; padding: 20px; overflow-y: auto; }
+        h1 { color: #3498db; margin-bottom: 20px; font-size: 24px; }
+        h2 { color: #2c3e50; margin-bottom: 15px; }
+        h3 { color: #34495e; margin-bottom: 10px; }
+        ul { list-style: none; }
+        li { padding: 10px; cursor: pointer; border-radius: 5px; margin-bottom: 5px; transition: background 0.2s; }
+        li:hover { background: #34495e; }
+        li.active { background: #3498db; }
+        .form { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .field { margin-bottom: 15px; }
+        label { display: block; font-weight: 600; margin-bottom: 5px; color: #2c3e50; }
+        small { display: block; color: #7f8c8d; margin-bottom: 5px; font-size: 12px; }
+        input, select { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        button { background: #3498db; color: white; border: none; padding: 12px 24px; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:hover { background: #2980b9; }
+        .run { padding: 15px; border-radius: 4px; margin: 15px 0; }
+        .run.running { background: #f39c12; color: white; }
+        .run.completed { background: #27ae60; color: white; }
+        .run.failed { background: #e74c3c; color: white; }
+        .logs { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 4px; font-family: monospace; white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
+        .status { background: #ecf0f1; padding: 10px; border-radius: 4px; margin: 10px 0; }
+        .error { background: #e74c3c; color: white; padding: 10px; border-radius: 4px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <aside>
+            <h1>🔍 BAC Hunter</h1>
+            <div class="status">
+                <strong>Web Interface v1.0</strong><br>
+                <small>48 CLI Commands Available</small>
+            </div>
+            <h2>Commands</h2>
+            <ul id="commandList">
+                <li>Loading commands...</li>
+            </ul>
+        </aside>
+        <main>
+            <div id="mainContent">
+                <h2>Welcome to BAC Hunter Web Interface</h2>
+                <p>Select a command from the left sidebar to begin security testing.</p>
+                <div class="status">
+                    <strong>Features:</strong>
+                    <ul style="margin-left: 20px; margin-top: 10px;">
+                        <li>✅ 48 CLI commands fully integrated</li>
+                        <li>✅ Real-time execution monitoring</li>
+                        <li>✅ Complete parameter mapping</li>
+                        <li>✅ Database integration</li>
+                        <li>✅ AI/ML capabilities</li>
+                    </ul>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let commands = [];
+        let selectedCommand = null;
+
+        // Load commands from API
+        async function loadCommands() {
+            try {
+                const response = await fetch('/api/commands');
+                if (!response.ok) {
+                    throw new Error(`API Error: ${response.status}`);
+                }
+                commands = await response.json();
+                displayCommands();
+                updateMainContent();
+            } catch (error) {
+                console.error('Failed to load commands:', error);
+                document.getElementById('commandList').innerHTML = `
+                    <li class="error">Failed to load commands: ${error.message}</li>
+                    <li class="error">Check server logs for details</li>
+                `;
+            }
+        }
+
+        // Display commands in sidebar
+        function displayCommands() {
+            const commandList = document.getElementById('commandList');
+            commandList.innerHTML = commands.map(cmd => `
+                <li onclick="selectCommand('${cmd.name}')" class="command-item">
+                    <strong>${cmd.name}</strong><br>
+                    <small>${cmd.parameters.length} parameters</small>
+                </li>
+            `).join('');
+        }
+
+        // Select a command
+        function selectCommand(commandName) {
+            selectedCommand = commands.find(cmd => cmd.name === commandName);
+            
+            // Update active state
+            document.querySelectorAll('.command-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('li').classList.add('active');
+            
+            updateMainContent();
+        }
+
+        // Update main content area
+        function updateMainContent() {
+            const mainContent = document.getElementById('mainContent');
+            
+            if (!selectedCommand) {
+                mainContent.innerHTML = `
+                    <h2>Welcome to BAC Hunter Web Interface</h2>
+                    <p>Select a command from the left sidebar to begin security testing.</p>
+                    <div class="status">
+                        <strong>Available Commands:</strong> ${commands.length}
+                    </div>
+                `;
+                return;
+            }
+
+            const formHtml = selectedCommand.parameters.map(param => `
+                <div class="field">
+                    <label>${param.name} ${param.required ? '*' : ''}</label>
+                    ${param.help ? `<small>${param.help}</small>` : ''}
+                    <input type="${getInputType(param.type)}" 
+                           placeholder="${param.type}" 
+                           id="param_${param.name}"
+                           ${param.required ? 'required' : ''}>
+                </div>
+            `).join('');
+
+            mainContent.innerHTML = `
+                <h2>${selectedCommand.name}</h2>
+                ${selectedCommand.help ? `<p>${selectedCommand.help}</p>` : ''}
+                
+                <div class="form">
+                    <h3>Parameters</h3>
+                    ${formHtml}
+                    <button onclick="executeCommand()">🚀 Execute Command</button>
+                </div>
+                
+                <div id="executionStatus"></div>
+                <div id="executionLogs"></div>
+            `;
+        }
+
+        // Get appropriate input type
+        function getInputType(paramType) {
+            if (paramType === 'boolean') return 'checkbox';
+            if (paramType === 'integer') return 'number';
+            if (paramType.startsWith('array')) return 'text';
+            return 'text';
+        }
+
+        // Execute the selected command
+        async function executeCommand() {
+            if (!selectedCommand) return;
+
+            const statusDiv = document.getElementById('executionStatus');
+            const logsDiv = document.getElementById('executionLogs');
+            
+            // Collect parameter values
+            const parameters = {};
+            selectedCommand.parameters.forEach(param => {
+                const input = document.getElementById(`param_${param.name}`);
+                if (input) {
+                    if (param.type === 'boolean') {
+                        parameters[param.name] = input.checked;
+                    } else if (param.type.startsWith('array')) {
+                        parameters[param.name] = input.value.split(',').map(s => s.trim());
+                    } else {
+                        parameters[param.name] = input.value;
+                    }
+                }
+            });
+
+            try {
+                statusDiv.innerHTML = '<div class="run running">🚀 Executing command...</div>';
+                logsDiv.innerHTML = '';
+
+                const response = await fetch(`/api/commands/${selectedCommand.name}/execute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ parameters, stream: true })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Execution failed: ${response.status}`);
+                }
+
+                const data = await response.json();
+                statusDiv.innerHTML = `<div class="run running">🔄 Command running (ID: ${data.run_id})</div>`;
+                
+                // Set up WebSocket for real-time logs
+                setupWebSocket(data.run_id);
+                
+            } catch (error) {
+                console.error('Command execution failed:', error);
+                statusDiv.innerHTML = `<div class="run failed">❌ Execution failed: ${error.message}</div>`;
+            }
+        }
+
+        // Set up WebSocket for real-time logs
+        function setupWebSocket(runId) {
+            const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+            const ws = new WebSocket(`${wsProto}://${location.host}/ws/runs/${runId}`);
+            
+            ws.onmessage = function(event) {
+                const logsDiv = document.getElementById('executionLogs');
+                logsDiv.innerHTML += event.data;
+                logsDiv.scrollTop = logsDiv.scrollHeight;
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                document.getElementById('executionStatus').innerHTML = 
+                    '<div class="run failed">❌ WebSocket connection failed</div>';
+            };
+            
+            ws.onclose = function() {
+                document.getElementById('executionStatus').innerHTML = 
+                    '<div class="run completed">✅ Command completed</div>';
+            };
+        }
+
+        // Initialize the interface
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCommands();
+        });
+    </script>
+</body>
 </html>
