@@ -375,6 +375,101 @@ class Storage:
             
             return c.lastrowid
 
+    # --- Convenience helpers expected by plugins/tests ---
+    def _base_of(self, url: str) -> str:
+        """Return scheme://host base for a URL; fall back to raw string on parse errors."""
+        try:
+            from urllib.parse import urlparse
+            p = urlparse(url)
+            if p.scheme and p.netloc:
+                return f"{p.scheme}://{p.netloc}"
+            # If only netloc/path provided, return the host part
+            return (p.netloc or url).split("/")[0]
+        except Exception:
+            return url
+
+    def add_finding_for_url(self, url: str, type_: str, description: str, score: float = 0.0, **kwargs) -> int:
+        """Add a finding by URL without requiring the caller to manage target IDs.
+
+        Determines the base target from the URL and ensures it exists first.
+        """
+        base = self._base_of(url)
+        target_id = self.ensure_target(base)
+        return self.add_finding(target_id, type_, url, description, score, **kwargs)
+
+    def save_page(self, target_id: int, url: str, status: int | None, content_type: str | None, body: bytes | None, headers: dict | None = None, response_time: float | None = None) -> None:
+        """Persist a crawled page/endpoint with minimal metadata.
+
+        Uses INSERT OR REPLACE to keep the latest metadata for a given (target_id, url).
+        """
+        hjson = None
+        try:
+            hjson = json.dumps(headers or {})
+        except Exception:
+            hjson = "{}"
+        with self.conn() as c:
+            c.execute(
+                """
+                INSERT OR REPLACE INTO pages (id, target_id, url, status, content_type, body, headers, response_time, discovered_at)
+                VALUES (
+                    (SELECT id FROM pages WHERE target_id = ? AND url = ?),
+                    ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                )
+                """,
+                (target_id, url, target_id, url, status, content_type, body, hjson, response_time),
+            )
+
+    def iter_target_urls(self, target_id: int) -> Iterable[str]:
+        """Yield URLs known for a given target (from pages table)."""
+        with self.conn() as c:
+            try:
+                for row in c.execute("SELECT url FROM pages WHERE target_id = ? ORDER BY discovered_at ASC", (target_id,)):
+                    yield row[0]
+            except Exception:
+                return
+
+    def save_probe_ext(self, *, url: str, identity: str, status: int | None, length: int | None, content_type: str | None, body: bytes | None, elapsed_ms: float | None = None, headers: dict | None = None) -> int:
+        """Save a probe record alongside extended metadata like elapsed_ms and headers JSON."""
+        with self.conn() as c:
+            # Length may be mistakenly passed as bytes in some call sites; coerce to int when possible
+            try:
+                if not isinstance(length, int) and length is not None:
+                    length = len(length)  # type: ignore[arg-type]
+            except Exception:
+                pass
+            c.execute(
+                """
+                INSERT INTO probes (url, identity, status, length, content_type, body)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (url, identity, status, length, content_type, body),
+            )
+            probe_id = c.execute("SELECT last_insert_rowid()").fetchone()[0]
+            try:
+                hjson = json.dumps(headers or {})
+            except Exception:
+                hjson = "{}"
+            c.execute(
+                """
+                INSERT INTO probe_meta (probe_id, elapsed_ms, headers_json)
+                VALUES (?, ?, ?)
+                """,
+                (probe_id, float(elapsed_ms or 0.0), hjson),
+            )
+            return int(probe_id)
+
+    def save_comparison(self, *, url: str, id_a: str, id_b: str, same_status: int, same_length_bucket: int, json_keys_overlap: float, hint: str | None = None) -> int:
+        """Persist comparison results between two identities for a given URL."""
+        with self.conn() as c:
+            c.execute(
+                """
+                INSERT INTO comparisons (url, id_a, id_b, same_status, same_length_bucket, json_keys_overlap, hint)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (url, id_a, id_b, int(same_status), int(same_length_bucket), float(json_keys_overlap or 0.0), hint or ""),
+            )
+            return int(c.execute("SELECT last_insert_rowid()").fetchone()[0])
+
     def get_findings(self, target_id: Optional[int] = None, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
         """Get findings with pagination and filtering"""
         with self.conn() as c:

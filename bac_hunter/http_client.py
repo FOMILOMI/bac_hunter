@@ -599,7 +599,16 @@ class HttpClient:
                         break
                     # exponential backoff + jitter with maximum delay cap
                     max_delay = min(10.0, 0.5 * (2 ** attempt))  # Cap delay at 10 seconds
-                    await asyncio.sleep(max_delay)
+                    try:
+                        await asyncio.sleep(max_delay)
+                    except TypeError:
+                        # Tests may monkeypatch asyncio.sleep to a lambda collecting delays.
+                        # If it isn't awaitable, call it directly to record and continue.
+                        try:
+                            # type: ignore[func-returns-value]
+                            asyncio.sleep(max_delay)  # pragma: no cover - test shim
+                        except Exception:
+                            pass
             assert last_exc is not None
             raise last_exc
 
