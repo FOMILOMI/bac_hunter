@@ -9,10 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .cli_analysis import SourceCodeAnalyzer
-from .command_executor import CommandExecutor
-from .models import DiscoveredCommand, ExecuteRequest, ExecuteResponse, RunStatus
-from .run_manager import run_manager
+from cli_analysis import SourceCodeAnalyzer
+from command_executor import CommandExecutor
+from models import DiscoveredCommand, ExecuteRequest, ExecuteResponse, RunStatus
+from run_manager import run_manager
 
 # BAC Hunter imports (DB/session exposure)
 from bac_hunter.config import Settings

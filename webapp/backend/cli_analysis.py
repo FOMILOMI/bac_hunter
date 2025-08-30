@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from .models import DiscoveredCommand, Parameter
+from models import DiscoveredCommand, Parameter
 
 
 @dataclass

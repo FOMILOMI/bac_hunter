@@ -3,7 +3,7 @@ import asyncio
 import time
 from typing import Dict, Optional
 
-from .models import RunStatus
+from models import RunStatus
 
 
 class RunManager:

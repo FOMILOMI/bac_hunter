@@ -6,7 +6,7 @@ import sys
 import uuid
 from typing import Any, Dict, List, Tuple
 
-from .models import DiscoveredCommand
+from models import DiscoveredCommand
 
 
 class CommandExecutor:
